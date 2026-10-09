@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конкуренти навколо точки</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c2430;--mut:#667085;--bd:#d6dbe3;--ac:#2e7d32;--ac2:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,Arial,sans-serif}
+header{padding:14px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
+header h1{margin:0;font-size:20px}
+header p{margin:2px 0 0;color:var(--mut);font-size:13px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--bd)}
+input,select{border:1px solid var(--bd);border-radius:8px;padding:8px 10px;font:inherit;background:var(--bg);color:var(--tx)}
+input[type=text]{min-width:220px}
+button{background:var(--card);border:1px solid var(--bd);color:var(--tx);border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}
+button.p{background:var(--ac);color:var(--ac2);border-color:var(--ac);font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.wrap{display:flex;gap:12px;padding:12px 16px;align-items:flex-start}
+#map{flex:1;height:72vh;border:1px solid var(--bd);border-radius:10px}
+#panel{width:360px;background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;max-height:72vh;overflow:auto}
+#panel h3{margin:0 0 8px;font-size:15px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{padding:5px 4px;border-bottom:1px solid var(--bd);text-align:left}
+.hint{color:var(--mut);font-size:13px;padding:0 16px 14px}
+.prog{color:var(--ac);font-size:13px}
+#capture{background:#fff;padding:10px}
+.pin-label{background:#fff;border:1px solid #333;border-radius:4px;padding:1px 6px;font-size:12px;font-weight:600;white-space:nowrap}
+.pin-label:before{display:none}
+.pin-label{cursor:move}
+.own-l{color:#c0392b;border-color:#c0392b;border-width:2px}
+.dot{width:22px;height:22px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #333}
+.dot.ap{opacity:.55}
+.own{width:26px;height:26px;border-radius:50%;border:4px solid #c0392b;background:#fff;box-shadow:0 0 0 3px #fff}
+#side{width:46%;min-width:340px;display:flex;flex-direction:column;background:#fff;height:72vh}
+.kpi{display:flex;gap:8px;padding:6px 8px 10px;text-align:center}
+.kpi div{flex:1;color:var(--mut);font-size:12px}.kpi b{display:block;color:#3b6fb6;font-size:20px;font-weight:400}
+#panel{width:auto;flex:1;border-radius:0;border:0;border-top:1px solid var(--bd);padding:0}
+#panel th{position:sticky;top:0;background:#fff;font-weight:600}
+#panel td{font-size:12px;vertical-align:top}
+.toin{border:1px solid transparent;background:transparent;width:58px;padding:2px 4px;font:inherit;color:inherit;border-radius:4px}
+.toin:hover,.toin:focus{border-color:var(--bd);background:#fff}
+tr.bz td{border-top:2px solid #1565d8;border-bottom:2px solid #1565d8}
+tr.bz td:first-child{border-left:2px solid #1565d8}
+tr.bz td:last-child{border-right:2px solid #1565d8}
+#premBox input{padding:3px 5px;width:100%;min-width:70px;font-size:12px}
+#dbgL{max-height:280px;overflow:auto}
+.dot.sel,img.sel{outline:4px solid #ff3b30;outline-offset:2px}
+.pin-label.sel{outline:3px solid #ff3b30}
+#tbl tbody tr{cursor:pointer}
+tr.selrow td{background:#ffe08a!important}
+details{margin:0 16px 12px;font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+<h1>🗺️ Конкуренти навколо точки</h1>
+<p>Особистий інструмент. Завантаж реєстр аптек, постав точку, задай радіус.</p>
+</header>
+<div class="toolbar">
+<label class="b">📁 Реєстр (.xlsx)<input id="reg" type="file" accept=".xlsx" style="display:none"></label>
+<span id="regInfo" class="hint" style="padding:0">Реєстр не завантажено</span>
+<button id="regClr" style="display:none">🗑 Забути реєстр</button>
+<input id="addr" type="text" placeholder="Адреса, або координати 49.123, 25.456, або посилання з @lat,lng">
+<input id="mgr" type="text" placeholder="Менеджер, який запропонував адресу" style="min-width:210px">
+<button id="find">Знайти на карті</button>
+<span style="color:var(--mut);font-size:13px">або клікни на карті</span>
+<input id="city" type="text" placeholder="Місто для пошуку конкурентів" style="min-width:160px">
+<input id="radius" type="number" value="500" style="width:90px" title="Радіус, м"> м
+<input id="radiusR" type="range" min="50" max="3000" step="50" value="500" style="width:140px">
+<button id="prep">🗄 Підготувати базу міста</button>
+<button id="prep2" title="Ще раз шукає аптеки з відсутніми, приблизними або дуже далекими координатами">🔄 Перепідготувати проблемні</button>
+<button id="scan" class="p" disabled>Знайти конкурентів</button>
+<button id="stop" style="display:none">⏹ Зупинити</button>
+<button id="save" disabled>💾 Зберегти зображення</button>
+<button id="addp">＋ Додати аптеку</button>
+<label>Значки <input id="isz" type="range" min="14" max="60" value="26" style="width:80px"></label>
+<label>Підписи <input id="lsz" type="range" min="10" max="24" value="12" style="width:80px"></label>
+<button id="dl">⬇ Зберегти базу</button>
+<label>⬆ Завантажити базу<input id="impb" type="file" accept=".json" style="display:none"></label>
+</div>
+<div class="hint" id="baseInfo" style="padding-bottom:0"></div>
+<div class="hint" style="padding-bottom:0">Перетягуй значки та підписи мишею. Правий клік по значку — прибрати аптеку. Нове місце значка запам’ятовується в базі.</div>
+<div class="hint" id="st"></div>
+<details id="premBox"><summary>📋 База приміщень (<span id="premN">0</span>) — адреси, які я вводила</summary>
+<div style="margin:6px 0"><button id="premAdd">＋ Записати поточну точку</button> <button id="premExp" class="p">⬇ Завантажити Excel</button> <button id="premClr">Очистити список</button></div>
+<div style="max-height:260px;overflow:auto"><table><thead><tr><th>Дата</th><th>Місто</th><th>Адреса</th><th>Менеджер</th><th>Телефон</th><th>Від кого</th><th></th></tr></thead><tbody id="premList"></tbody></table></div></details>
+<details id="brandBox" style="display:none"><summary>Значки мереж: один значок на всю мережу (усі її юрособи)</summary><div id="brandList"></div></details>
+<details id="dbg" style="display:none"><summary id="dbgS"></summary><div id="dbgL"></div></details>
+<details id="dbgA" style="display:none"><summary id="dbgAS"></summary><div id="dbgAL"></div></details>
+<div class="wrap">
+<div id="capture" style="display:flex;gap:0;flex:1;align-items:stretch">
+<div id="side">
+<div class="kpi"><div>Товарообіг, mUAH<b id="k1">–</b></div><div>Кількість організацій<b id="k2">–</b></div><div>Товарообіг на організацію, mUAH<b id="k3">–</b></div></div>
+<div id="panel"><table id="tbl"><thead><tr><th>Pharmacy</th><th>Turn., mUAH</th><th>м</th></tr></thead><tbody></tbody></table></div>
+</div>
+<div id="map"></div>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const st=t=>$('st').textContent=t||'';
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let registry=[],own=null,ownMarker=null,circle=null,markers=[],geoCache={};
+function regInfoText(n,ts){return 'Завантажено: '+n+' аптек'+(ts?' (востаннє оновлено '+new Date(ts).toLocaleString('uk-UA')+')':'');}
+function saveRegistry(){
+  try{localStorage.setItem('registryV2',JSON.stringify({ts:Date.now(),data:registry}));}
+  catch(e){st('Реєстр великий, браузер не зміг зберегти його для наступного разу — доведеться завантажувати файл щоразу. Спробуй «🗑 Забути реєстр» в інших вкладках, якщо користуєшся сайтом з кількох.');}
+}
+(function loadRegistry(){
+  try{
+    const raw=localStorage.getItem('registryV2');
+    if(!raw)return;
+    const {ts,data}=JSON.parse(raw);
+    if(Array.isArray(data)&&data.length){registry=data;$('regInfo').textContent=regInfoText(registry.length,ts);$('regClr').style.display='inline-block';}
+  }catch(e){}
+})();
+$('regClr').onclick=()=>{
+  if(!confirm('Забути збережений реєстр ('+registry.length+' аптек)? Доведеться завантажити файл заново.'))return;
+  registry=[];localStorage.removeItem('registryV2');
+  $('regInfo').textContent='Реєстр не завантажено';$('regClr').style.display='none';baseInfo();
+};
+try{geoCache=JSON.parse(localStorage.getItem('geoCache2')||'{}');}catch(e){}
+const map=L.map('map').setView([49.0,31.5],6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap',crossOrigin:true}).addTo(map);
+function saveCache(){}
+let refPt=null;const okPt=res=>res&&(!refPt||haversine(refPt,res.p)<50000);
+function haversine(a,b){const R=6371000,r=Math.PI/180;
+  const dLat=(b[0]-a[0])*r,dLng=(b[1]-a[1])*r;
+  const x=Math.sin(dLat/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLng/2)**2;
+  return Math.round(2*R*Math.asin(Math.sqrt(x)));}
+//<parse>
+const ROW_RE=/(Аптека|Аптечний\s+пункт)\s*№\s*(\d+\S*)\s+(.+?)\s*\(([^)]*)\)\s*\/\s*(.+?)\/?\s*$/i;
+const ST_MAP={'вул':'вулиця','вулиця':'вулиця','пров':'провулок','провулок':'провулок','просп':'проспект','пр-т':'проспект','проспект':'проспект','бул':'бульвар','б-р':'бульвар','бульвар':'бульвар','пл':'площа','площа':'площа','наб':'набережна','набережна':'набережна','узвіз':'узвіз','проїзд':'проїзд','пр-д':'проїзд','шосе':'шосе','майдан':'майдан','алея':'алея','тупік':'тупік'};
+const STREET_RE=/^(вулиця|вул|провулок|пров|проспект|просп|пр-т|бульвар|бул|б-р|площа|пл|набережна|наб|узвіз|проїзд|пр-д|шосе|майдан|алея|тупік)\.?\s*(.+)$/i;
+function parseAddr(a){
+  const parts=a.split(',').map(s=>s.trim()).filter(Boolean);
+  let city='',street='',house='',state='',m;
+  for(let i=0;i<parts.length;i++){
+    const p=parts[i];
+    if(!state&&/обл\.?$/i.test(p)){state=p.replace(/\s*обл\.?$/i,' область');continue;}
+    if(!city&&(m=p.match(/^(?:смт\.?|сел\.|с-ще\.?|селище|село|місто|м\.|с\.)\s*(.+)$/i))){city=m[1].trim();continue;}
+    if(!street&&(m=p.match(STREET_RE))){
+      street=(ST_MAP[m[1].toLowerCase()]||m[1])+' '+m[2].trim();
+      const h=(parts[i+1]||'').match(/^(\d+\s?[А-Яа-яІіЇїЄєҐґA-Za-z]?(?:\/\d+[А-Яа-яІіЇїЄєA-Za-z]?)?)/);
+      if(h)house=h[1].replace(/\s/g,'');
+    }
+  }
+  return {city,street,house,state};
+}
+function parseRows(rows){
+  const out=[];let bad=null;
+  for(const row of rows){
+    if(!Array.isArray(row))continue;
+    const idx=row.findIndex(c=>typeof c==='string'&&/(?:Аптек[аи]|Аптечний\s+пункт)\s*№/i.test(c));
+    if(idx<0)continue;
+    const raw=row[idx].replace(/\u00a0/g,' ').replace(/^\d+\.\s*/,'').trim();
+    const m=raw.match(ROW_RE);
+    if(!m){bad=bad||raw;continue;}
+    let to=0;
+    for(const c of row.slice(idx+1)){
+      if(typeof c==='number'){to=c;break;}
+      if(typeof c==='string'&&/^[\d\s.,]+$/.test(c.trim())){to=parseFloat(c.replace(/\s/g,'').replace(',','.'))||0;break;}
+    }
+    out.push({raw,pt:/пункт/i.test(m[1]),num:m[2],brand:m[3].trim(),city:m[4].trim(),address:m[5].trim(),to});
+  }
+  return {out,bad};
+}
+//</parse>
+async function nom(params){
+  const key='v2:'+params;
+  if(key in geoCache)return geoCache[key];
+  let j=null;
+  for(let t=0;t<3&&!j;t++){
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&countrycodes=ua&accept-language=uk&'+params);
+    await sleep(1100);
+    if(r.ok){j=await r.json();break;}
+    if(r.status===429||r.status===403){await sleep(6000);continue;}
+    throw new Error('HTTP '+r.status);
+  }
+  if(!j)throw new Error('ліміт сервісу пошуку адрес');
+  const res=j[0]?{p:[+j[0].lat,+j[0].lon],exact:!!(j[0].address&&j[0].address.house_number)}:null;
+  geoCache[key]=res;saveCache();return res;
+}
+let nomBad=0;
+async function photon(text){
+  const key='p:'+text;
+  if(key in geoCache)return geoCache[key];
+  const r=await fetch('https://photon.komoot.io/api/?limit=1'+(refPt?'&lat='+refPt[0]+'&lon='+refPt[1]:'')+'&q='+encodeURIComponent(text));
+  await sleep(500);
+  if(!r.ok)throw new Error('Photon HTTP '+r.status);
+  const j=await r.json(),f=j.features&&j.features[0];
+  const res=f?{p:[f.geometry.coordinates[1],f.geometry.coordinates[0]],exact:!!f.properties.housenumber}:null;
+  geoCache[key]=res;saveCache();return res;
+}
+async function nomMany(params){
+  const key='m:'+params;
+  if(key in geoCache)return geoCache[key];
+  const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&countrycodes=ua&accept-language=uk&'+params);
+  await sleep(1100);
+  if(!r.ok)throw new Error('HTTP '+r.status);
+  const j=await r.json();
+  const res=j.map(x=>({p:[+x.lat,+x.lon],type:x.type,house:(x.address&&x.address.house_number)||'',road:(x.address&&x.address.road)||''}));
+  geoCache[key]=res;return res;
+}
+async function findPharmacy(r,a,city){
+  const sname=a.street.replace(/^\S+\s+/,'');
+  const stem=sname.toLowerCase().slice(0,Math.max(4,sname.length-2));
+  const list=await nomMany('q='+encodeURIComponent(chainKey(r.brand)+' '+sname+', '+city+(a.state?', '+a.state:'')));
+  const ph=list.filter(x=>x.type==='pharmacy'&&(!x.road||x.road.toLowerCase().includes(stem)));
+  const byHouse=a.house&&ph.find(x=>x.house&&x.house.toLowerCase()===a.house.toLowerCase());
+  if(byHouse)return {p:byHouse.p,exact:true};
+  if(ph.length===1)return {p:ph[0].p,exact:true};
+  return null;
+}
+async function locateAltText(text){
+  try{const list=await nomMany('q='+encodeURIComponent(text));if(list&&list.length)return{p:list[0].p,exact:true};}catch(e){}
+  try{const res=await photon(text);if(okPt(res))return res;}catch(e){}
+  return null;
+}
+async function locate(r){
+  const a=parseAddr(r.address);
+  const city=a.city||r.city.split(',').pop().trim();
+  const e=encodeURIComponent,qs=[];
+  if(a.street){
+    qs.push('street='+e((a.house?a.house+' ':'')+a.street)+'&city='+e(city)+(a.state?'&state='+e(a.state):''));
+    qs.push('q='+e(a.street+(a.house?' '+a.house:'')+', '+city+(a.state?', '+a.state:'')));
+  }else qs.push('q='+e(r.address.replace(/^Україна,\s*/i,'').replace(/[^,]*р-н\.?,?/g,'')));
+  const text=a.street?a.street+(a.house?' '+a.house:'')+', '+city:r.address.replace(/^Україна,\s*/i,'').replace(/[^,]*р-н\.?,?/g,'');
+  const viaPhoton=async()=>{const res=await photon(text);return okPt(res)?res:null;};
+  if(Date.now()<nomBad)return viaPhoton();
+  let best=null;
+  try{
+    for(const q of qs){
+      const res=await nom(q);
+      if(okPt(res)){if(res.exact)return res;if(!best)best=res;}
+    }
+  }catch(e){nomBad=Date.now()+180000;console.warn('Nominatim недоступний, запасний сервіс',e);return viaPhoton();}
+  if((!best||!best.exact)&&a.street){
+    try{const ph=await findPharmacy(r,a,city);if(okPt(ph))return ph;}catch(e){console.warn('POI',e);}
+  }
+  return best;
+}
+
+$('reg').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  st('Читаю реєстр…');
+  const rd=new FileReader();
+  rd.onload=ev=>{
+    const wb=XLSX.read(ev.target.result,{type:'array'});
+    let all=[],bad=null;
+    for(const n of wb.SheetNames){
+      const {out,bad:b}=parseRows(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1}));
+      all=all.concat(out);bad=bad||b;
+    }
+    registry=all;
+    saveRegistry();
+    $('regInfo').textContent=regInfoText(registry.length,Date.now());
+    $('regClr').style.display='inline-block';
+    baseInfo();
+    st(registry.length?'':'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
+  };
+  rd.readAsArrayBuffer(f);
+};
+
+map.on('zoomend',()=>{markers.forEach(m=>m.relayout&&m.relayout());relayoutOwn();});
+let ownLabel=null,ownLine=null,ownOff=[0,36];
+const ownLpOf=q=>map.layerPointToLatLng(map.latLngToLayerPoint(q).add(ownOff));
+function relayoutOwn(){if(!own||!ownLabel)return;const l=ownLpOf(own);ownLabel.setLatLng(l);ownLine.setLatLngs([own,l]);}
+function setOwn(latlng,label){
+  own=latlng;
+  if(ownMarker)map.removeLayer(ownMarker);
+  ownMarker=L.marker(latlng,{draggable:true,icon:L.divIcon({className:'',html:'<div class="own"></div>',iconSize:[26,26],iconAnchor:[13,13]})}).addTo(map);
+  if(ownLabel)map.removeLayer(ownLabel);
+  if(ownLine)map.removeLayer(ownLine);
+  const lp=ownLpOf(own);
+  ownLabel=L.marker(lp,{draggable:true,zIndexOffset:600,icon:L.divIcon({className:'',html:'<div class="pin-label own-l" style="width:max-content;transform:translate(-50%,-50%)">Приміщення</div>',iconSize:[0,0]})}).addTo(map);
+  ownLine=L.polyline([own,lp],{color:'#c0392b',weight:1.5}).addTo(map);
+  ownMarker.on('drag',e=>{const q=e.latlng,l=ownLpOf([q.lat,q.lng]);ownLabel.setLatLng(l);ownLine.setLatLngs([q,l]);});
+  ownMarker.on('dragend',e=>{const ll=e.target.getLatLng();own=[ll.lat,ll.lng];updateCircle(false);recalc();});
+  ownLabel.on('drag',e=>{const q=e.latlng,a=map.latLngToLayerPoint(q),b=map.latLngToLayerPoint(own);ownOff=[a.x-b.x,a.y-b.y];ownLine.setLatLngs([own,[q.lat,q.lng]]);});
+  $('ptitle')&&($('ptitle').textContent=label);
+  updateCircle();
+  $('save').disabled=false;
+  updateScanBtn();
+  fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng[0]}&lon=${latlng[1]}&accept-language=uk`)
+    .then(r=>r.json()).then(j=>{const c=j.address&&(j.address.city||j.address.town||j.address.village);if(c&&curPrem){curPrem.city=c;savePrem();renderPrem();}if(c&&!$('city').value){$('city').value=c;updateScanBtn();baseInfo();}}).catch(()=>{});
+}
+function updateCircle(fit=true){
+  if(!own)return;
+  if(circle)map.removeLayer(circle);
+  circle=L.circle(own,{radius:+$('radius').value||500,color:'transparent',weight:0,fillOpacity:0,interactive:false}).addTo(map);
+  if(fit)map.fitBounds(circle.getBounds(),{padding:[20,20]});
+}
+let radiusDebounce=null;
+function onRadiusChange(v){
+  $('radius').value=v;$('radiusR').value=v;
+  updateCircle(false);
+  clearTimeout(radiusDebounce);
+  radiusDebounce=setTimeout(()=>{if(!$('scan').disabled)doScan(' · (оновлено повзунком радіуса)');},150);
+}
+$('radius').oninput=()=>onRadiusChange($('radius').value);
+$('radiusR').oninput=()=>onRadiusChange($('radiusR').value);
+map.on('click',e=>{
+  if(placeMode){
+    const r=placeMode.r,btn=placeMode.btn,wasFix=placeMode.fix,p=[e.latlng.lat,e.latlng.lng];
+    placeMode=null;map.getContainer().style.cursor='';
+    base[r.address]={p:[+p[0].toFixed(6),+p[1].toFixed(6)],e:1};saveBase();
+    const existing=markers.find(m=>m.r.address&&m.r.address===r.address);
+    if(existing){
+      existing.p=p;existing.exact=true;existing.d=own?haversine(own,p):0;
+      existing.marker.setLatLng(p);existing.relayout();refreshItem(existing);recalc();
+    }else{
+      addCompetitor(r,p,own?haversine(own,p):0,true);
+    }
+    renderTable();renderBrands();baseInfo();
+    st((wasFix?'Виправлено: ':'Додано: ')+r.raw);
+    if(btn&&btn.closest('div'))btn.closest('div').remove();
+    return;
+  }
+  if(addMode)addManual(e.latlng);else{curPrem=null;setOwn([e.latlng.lat,e.latlng.lng]);}
+});
+
+$('find').onclick=async()=>{
+  const raw=$('addr').value.trim();if(!raw)return;
+  let m=raw.match(/^(-?\d{1,3}\.\d+)\s*[,;]\s*(-?\d{1,3}\.\d+)$/);
+  if(!m)m=raw.match(/[@=](-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
+  if(m){curPrem=null;setOwn([parseFloat(m[1]),parseFloat(m[2])],raw);logPrem(raw,$('city').value.trim());return;}
+  if(/^https?:\/\//i.test(raw)){st('У цьому посиланні немає координат (схоже на скорочене maps.app.goo.gl). Відкрий його в Google Картах і встав сюди числа з адресного рядка (@lat,lng), або клікни на карті.');return;}
+  st('Шукаю адресу…');$('find').disabled=true;
+  try{
+    const a=parseAddr(raw.replace(/^/,''));
+    const res=await nom('q='+encodeURIComponent(raw+', Україна'));
+    $('find').disabled=false;
+    if(!res){st('Адресу не знайдено. Клікни потрібне місце на карті або встав координати.');return;}
+    st('');curPrem=null;setOwn(res.p,raw);logPrem(raw,$('city').value.trim());
+  }catch(e){$('find').disabled=false;st('Помилка пошуку адреси: '+e.message);}
+};
+
+let prem=[],curPrem=null;
+try{prem=JSON.parse(localStorage.getItem('premises')||'[]');}catch(e){}
+const savePrem=()=>{try{localStorage.setItem('premises',JSON.stringify(prem));}catch(e){}};
+const pinp=(i,k,v)=>`<input data-i="${i}" data-k="${k}" value="${esc(v||'')}">`;
+function renderPrem(){
+  $('premN').textContent=prem.length;
+  $('premList').innerHTML=prem.map((p,i)=>`<tr><td>${p.sent}</td><td>${pinp(i,'city',p.city)}</td><td>${pinp(i,'addr',p.addr)}</td><td>${pinp(i,'mgr',p.mgr)}</td><td>${pinp(i,'phone',p.phone)}</td><td>${pinp(i,'from',p.from)}</td><td><button data-del="${i}">×</button></td></tr>`).join('');
+}
+function logPrem(addr,city){
+  const key=(city+'|'+addr).toLowerCase();
+  let p=prem.find(x=>(x.city+'|'+x.addr).toLowerCase()===key);
+  if(!p){p={mgr:$('mgr').value.trim(),city,addr,sent:new Date().toISOString().slice(0,10),phone:'',from:''};prem.push(p);savePrem();}
+  if(!p.mgr&&$('mgr').value.trim()){p.mgr=$('mgr').value.trim();savePrem();}
+  curPrem=p;renderPrem();
+}
+$('premList').addEventListener('input',e=>{const t=e.target;if(t.dataset.k){prem[+t.dataset.i][t.dataset.k]=t.value;if(t.dataset.k==='mgr')try{localStorage.setItem('lastMgr',t.value);}catch(x){}savePrem();}});
+$('premList').addEventListener('click',e=>{const d=e.target.dataset.del;if(d!==undefined){prem.splice(+d,1);savePrem();renderPrem();}});
+$('premAdd').onclick=()=>{
+  if(!own){st('Спочатку постав точку.');return;}
+  logPrem($('addr').value.trim()||own.map(x=>x.toFixed(6)).join(', '),$('city').value.trim());
+  $('premBox').open=true;
+};
+$('premClr').onclick=()=>{if(prem.length&&confirm('Очистити список? Спочатку заверши експорт в Excel.')){prem=[];curPrem=null;savePrem();renderPrem();}};
+$('premExp').onclick=()=>{
+  if(!prem.length){st('Список порожній.');return;}
+  const rows=[['менеджер з розвитку','місто ','коментар по приміщенню','Отримала','відправила','телефон власника','від кого пропозиція ']];
+  prem.forEach(p=>rows.push([p.mgr,p.city,p.addr,'',new Date(p.sent),p.phone,p.from]));
+  const ws=XLSX.utils.aoa_to_sheet(rows,{cellDates:true});
+  for(let i=2;i<=rows.length;i++)if(ws['E'+i])ws['E'+i].z='dd.mm.yyyy';
+  ws['!cols']=[{wch:18},{wch:16},{wch:34},{wch:12},{wch:12},{wch:16},{wch:20}];
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Аркуш1');
+  XLSX.writeFile(wb,'приміщення_нові_'+new Date().toISOString().slice(0,10)+'.xlsx');
+};
+try{$('mgr').value=localStorage.getItem('lastMgr')||'';}catch(e){}
+$('mgr').oninput=()=>{const v=$('mgr').value;try{localStorage.setItem('lastMgr',v);}catch(e){}if(curPrem){curPrem.mgr=v.trim();savePrem();renderPrem();}};
+renderPrem();
+let base={},scanning=false;
+try{base=JSON.parse(localStorage.getItem('pharmBase')||'{}');}catch(e){}
+function saveBase(){try{localStorage.setItem('pharmBase',JSON.stringify(base));return true;}catch(e){st('У браузері закінчилося місце: натисни «Зберегти базу» і поклади файл pharmacies.json поруч з index.html на Netlify.');return false;}}
+fetch('pharmacies.json').then(r=>r.ok?r.json():null).then(j=>{if(j){for(const k in j)if(!(k in base))base[k]=j[k];baseInfo();}}).catch(()=>{});
+const fmt=n=>n.toFixed(2).replace('.',',');
+function hue(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return h%360;}
+function cityCands(){
+  const city=$('city').value.trim().toLowerCase();
+  if(!city)return [];
+  return registry.filter(r=>{
+    const a=parseAddr(r.address);
+    const c=(a.city||r.city.split(',').pop()||'').trim().toLowerCase();
+    return c.includes(city);
+  });
+}
+function baseInfo(){
+  let t='База координат: '+Object.keys(base).length+' адрес';
+  const c=cityCands();
+  if(c.length){
+    const done=c.filter(r=>base[r.address]&&base[r.address].p).length;
+    const failed=c.filter(r=>base[r.address]&&!base[r.address].p).length;
+    t+=` · у місті «${$('city').value.trim()}» готово ${done} з ${c.length}`+(failed?` (${failed} не знайдено — повторна спроба при наступному «Підготувати базу»)`:'');
+  }
+  $('baseInfo').textContent=t;
+}
+function updateScanBtn(){$('scan').disabled=!own||!$('city').value.trim();}
+$('city').oninput=()=>{updateScanBtn();baseInfo();};
+baseInfo();
+
+async function runPrep(retry){
+  if(!registry.length){st('Спочатку завантаж реєстр (.xlsx).');return;}
+  if(!$('city').value.trim()){st('Впиши місто, яке треба підготувати.');return;}
+  if(retry){
+    const c=cityCands(),pts=c.map(r=>base[r.address]).filter(b=>b&&b.p).map(b=>b.p);
+    const med=pts.length?[pts.map(x=>x[0]).sort((x,y)=>x-y)[pts.length>>1],pts.map(x=>x[1]).sort((x,y)=>x-y)[pts.length>>1]]:null;
+    for(const r of c){const b=base[r.address];if(b&&(!b.p||!b.e||(med&&haversine(med,b.p)>20000)))delete base[r.address];}
+  }
+  const todo=cityCands().filter(r=>!(r.address in base)||!base[r.address].p);
+  if(!todo.length){st('Усі аптеки цього міста вже є в базі — можна шукати конкурентів.');baseInfo();return;}
+  refPt=null;scanning=true;$('prep').style.display=$('prep2').style.display='none';$('stop').style.display='inline-block';
+  let ok=0,miss=0,err=0;
+  for(let i=0;i<todo.length&&scanning;i++){
+    const r=todo[i];
+    st(`Готую базу: ${i+1} з ${todo.length} (≈${Math.ceil((todo.length-i)*1.6/60)} хв). Знайдено: ${ok}, не знайдено: ${miss}${err?', збоїв: '+err:''}${nomBad?' | працює запасний сервіс':''}`);
+    try{
+      const res=await locate(r);
+      base[r.address]=res?{p:[+res.p[0].toFixed(6),+res.p[1].toFixed(6)],e:res.exact?1:0}:{m:1};
+      res?ok++:miss++;
+    }catch(e){err++;console.warn(e);await sleep(3000);}
+    if(i%10===9)saveBase();
+  }
+  const stopped=!scanning;
+  saveBase();scanning=false;$('prep').style.display=$('prep2').style.display='inline-block';$('stop').style.display='none';baseInfo();
+  st((stopped?'Зупинено. ':'Готово. ')+`Додано в базу: ${ok}, не знайдено в OSM: ${miss}${err?', збоїв мережі: '+err+' (натисни кнопку ще раз — доробить)':''}. Тепер «Знайти конкурентів» працює миттєво.`);
+}
+$('prep').onclick=()=>runPrep(false);
+$('prep2').onclick=()=>runPrep(true);
+$('stop').onclick=()=>{scanning=false;};
+
+function doScan(note){
+  if(!own)return;
+  if(!registry.length){st('Спочатку завантаж реєстр (.xlsx).');return;}
+  const rad=+$('radius').value||500,cand=cityCands();
+  if(!cand.length){st('За словом «'+$('city').value.trim()+'» у реєстрі нічого не знайдено. Пиши місто як у реєстрі (напр. «Чернівці»).');return;}
+  clearMarkers();
+  let missing=0;const noc=[],outs=[];
+  for(const r of cand){
+    const b=base[r.address];
+    if(!b||!b.p){if(!b)missing++;noc.push(r);continue;}
+    const d=haversine(own,b.p);
+    if(d<=rad)addCompetitor(r,b.p,d,!!b.e);else if(d<=rad*2)outs.push({r,d});
+  }
+  renderTable();renderBrands();
+  renderApprox(cand);
+  const approx=markers.filter(m=>!m.exact).length;
+  st(`У радіусі ${rad} м: ${markers.length}`+(approx?` (${approx} зі знаком ≈ — позиція приблизна)`:'')+(missing?` · УВАГА: ${missing} з ${cand.length} аптек міста ще не в базі — натисни «Підготувати базу міста» або постав їх вручну (📍)`:'')+(outs.length?` · трохи за межею радіуса: ${outs.sort((x,y)=>x.d-y.d).slice(0,5).map(o=>(o.r.pt?'АП ':'')+'№'+o.r.num+' ('+o.d+' м)').join(', ')}`:'')+(noc.length?` · без координат: ${noc.length}`:'')+note);
+  $('dbg').style.display=noc.length?'block':'none';
+  $('dbg').open=!!noc.length;
+  if(noc.length){
+    $('dbgS').textContent='⚠️ Аптеки без координат ('+noc.length+') — постав на карті або спробуй ще раз';
+    $('dbgL').innerHTML=`<div style="margin:0 0 8px"><button id="nocRetry" class="p">🔁 Спробувати ще раз саме ці (${noc.length})</button></div>`+
+      noc.map((r,i)=>`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0;padding-bottom:6px;border-bottom:1px dashed var(--bd,#d6dbe3)">
+      <span style="flex:1;min-width:220px">${esc(r.raw)}</span>
+      <input data-alt="${i}" placeholder="інша назва вулиці (перехрестя)" style="width:190px;padding:4px 6px"><button data-altok="${i}">Пошук</button>
+      <input data-coord="${i}" placeholder="координати з Google: 49.08, 25.72" style="width:190px;padding:4px 6px"><button data-coordok="${i}">OK</button>
+      <button data-placebtn="${i}">📍 Поставити на карті</button>
+    </div>`).join('');
+    $('nocRetry').onclick=async()=>{
+      $('nocRetry').disabled=true;
+      let ok=0;
+      for(let i=0;i<noc.length;i++){
+        const r=noc[i];
+        st(`Пробую ще раз: ${i+1} з ${noc.length}, знайдено: ${ok}`);
+        try{const res=await locate(r);if(res){base[r.address]={p:[+res.p[0].toFixed(6),+res.p[1].toFixed(6)],e:res.exact?1:0};ok++;}}catch(e){}
+      }
+      saveBase();baseInfo();
+      st(`Повторна спроба готова: знайдено ${ok} з ${noc.length}.`);
+      $('scan').onclick();
+    };
+    const putCoord=i=>{
+      const r=noc[i],inp=$('dbgL').querySelector('[data-coord="'+i+'"]'),p=parseCoord(inp.value);
+      if(!p){st('Не розпізнала координати. У Google Картах: правий клік по аптеці → перший рядок меню (копіює координати) → встав сюди, напр. 49.0832, 25.7231');return;}
+      base[r.address]={p:[+p[0].toFixed(6),+p[1].toFixed(6)],e:1};saveBase();
+      addCompetitor(r,p,own?haversine(own,p):0,true);
+      renderTable();renderBrands();baseInfo();
+      st('Додано: '+r.raw);
+      inp.closest('div').remove();
+    };
+    $('dbgL').querySelectorAll('[data-coordok]').forEach(b=>{b.onclick=()=>putCoord(+b.dataset.coordok);});
+    $('dbgL').querySelectorAll('[data-coord]').forEach(inp=>{inp.onkeydown=e=>{if(e.key==='Enter')putCoord(+inp.dataset.coord);};});
+    const tryAlt=async i=>{
+      const r=noc[i],inp=$('dbgL').querySelector('[data-alt="'+i+'"]'),alt=inp.value.trim();
+      if(!alt){st('Впиши іншу назву вулиці (як на перехресті), напр. «Велика Перспективна 5».');return;}
+      const btn=$('dbgL').querySelector('[data-altok="'+i+'"]');btn.disabled=true;btn.textContent='Шукаю…';
+      const city=r.city.split(',').pop().trim();
+      const res=await locateAltText(alt+', '+city+', Україна');
+      btn.disabled=false;btn.textContent='Пошук';
+      if(!res){st('За «'+alt+'» теж нічого не знайдено. Спробуй ще варіант, координати чи «Поставити на карті».');return;}
+      base[r.address]={p:[+res.p[0].toFixed(6),+res.p[1].toFixed(6)],e:res.exact?1:0};saveBase();
+      addCompetitor(r,res.p,own?haversine(own,res.p):0,res.exact);
+      renderTable();renderBrands();baseInfo();
+      st('Додано за альтернативною адресою: '+r.raw);
+      inp.closest('div').remove();
+    };
+    $('dbgL').querySelectorAll('[data-altok]').forEach(b=>{b.onclick=()=>tryAlt(+b.dataset.altok);});
+    $('dbgL').querySelectorAll('[data-alt]').forEach(inp=>{inp.onkeydown=e=>{if(e.key==='Enter')tryAlt(+inp.dataset.alt);};});
+    $('dbgL').querySelectorAll('[data-placebtn]').forEach(btn=>{
+      btn.onclick=()=>{
+        const i=+btn.dataset.placebtn,r=noc[i];
+        placeMode={r,btn};
+        map.getContainer().style.cursor='crosshair';
+        st('Клікни на карті, де стоїть «'+r.raw+'».');
+      };
+    });
+  }
+}
+$('scan').onclick=async()=>{
+  doScan('');
+  if(!own||!registry.length)return;
+  const rad=+$('radius').value||500,cand=cityCands();
+  if(!cand.length)return;
+  const t0=$('st').textContent;
+  st(t0+' · звіряю з аптеками на карті OSM…');
+  try{
+    const pois=await poiAround(Math.min(rad+300,2500)),snaps=snapPois(pois,cand);
+    if(snaps.length){
+      snaps.forEach(x=>{base[x.r.address]={p:[+x.p[0].toFixed(6),+x.p[1].toFixed(6)],e:1};});
+      saveBase();
+      doScan(` · за аптеками на карті OSM точно розставлено: ${snaps.length}`);
+    }else st(t0+` · на карті OSM знайдено аптек: ${pois.length}, нових точних збігів немає`);
+  }catch(e){st(t0+' · звірка з аптеками на карті OSM не вдалась ('+e.message+')');}
+};
+//<snap>
+const poiCache={};
+async function poiAround(rad){
+  const ck=own[0].toFixed(4)+','+own[1].toFixed(4)+','+rad;
+  if(poiCache[ck])return poiCache[ck];
+  const q=`[out:json][timeout:25];(node["amenity"="pharmacy"](around:${rad},${own[0]},${own[1]});way["amenity"="pharmacy"](around:${rad},${own[0]},${own[1]}););out center tags;`;
+  const hosts=['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  const one=async h=>{
+    const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),10000),nm=h.split('/')[2];
+    try{
+      const r=await fetch(h,{method:'POST',body:'data='+encodeURIComponent(q),signal:ctl.signal});
+      if(!r.ok)throw new Error(nm+': HTTP '+r.status);
+      return await r.json();
+    }catch(e){throw new Error(e.name==='AbortError'?nm+': час очікування вийшов':(e.message.startsWith(nm)?e.message:nm+': '+e.message));}
+    finally{clearTimeout(tm);}
+  };
+  let j;
+  try{j=await Promise.any(hosts.map(one));}
+  catch(e){throw new Error((e.errors||[e]).map(x=>x.message).join('; '));}
+  return poiCache[ck]=j.elements.map(e=>{
+    const t=e.tags||{},c=e.type==='node'?[e.lat,e.lon]:[e.center.lat,e.center.lon];
+    return {p:c,text:((t.name||'')+' '+(t['name:uk']||'')+' '+(t.brand||'')+' '+(t.operator||'')).toLowerCase().replace(/[.'’ʼ]/g,''),street:(t['addr:street']||'').toLowerCase(),house:(t['addr:housenumber']||'').toLowerCase()};
+  });
+}
+function snapPois(pois,cands){
+  const items=[],byChain={};
+  const un=cands.filter(r=>{const b=base[r.address];return !(b&&b.e);});
+  un.forEach(r=>{const k=chainKey(r.brand);byChain[k]=(byChain[k]||0)+1;});
+  const poiCnt={};
+  for(const r of un){
+    const key=chainKey(r.brand).toLowerCase().replace(/[.'’ʼ]/g,'');
+    poiCnt[key]=pois.filter(x=>x.text.includes(key)).length;
+  }
+  for(const r of un){
+    const b=base[r.address],a=parseAddr(r.address);
+    const key=chainKey(r.brand).toLowerCase().replace(/[.'’ʼ]/g,'');
+    const sn=a.street?a.street.replace(/^\S+\s+/,'').toLowerCase():'';
+    const stem=sn.slice(0,Math.max(4,sn.length-2));
+    pois.forEach((poi,k)=>{
+      if(!poi.text.includes(key))return;
+      let score,dist=0;
+      if(poi.street){
+        if(!stem||!poi.street.includes(stem))return;
+        score=3;if(a.house&&poi.house&&poi.house===a.house.toLowerCase())score=6;
+      }else if(b&&b.p){
+        dist=haversine(b.p,poi.p);if(dist>400)return;score=1;
+      }else if(byChain[chainKey(r.brand)]===1&&poiCnt[key]===1){score=1;}
+      else return;
+      items.push({r,k,score,dist});
+    });
+  }
+  items.sort((x,y)=>y.score-x.score||x.dist-y.dist);
+  const usedP=new Set(),usedR=new Set(),res=[];
+  for(const it of items){
+    if(usedP.has(it.k)||usedR.has(it.r.address))continue;
+    usedP.add(it.k);usedR.add(it.r.address);res.push({r:it.r,p:pois[it.k].p});
+  }
+  return res;
+}
+//</snap>
+let placeMode=null;
+function renderApprox(cand){
+  const approxList=cand.filter(r=>{const b=base[r.address];return b&&b.p&&!b.e;});
+  $('dbgA').style.display=approxList.length?'block':'none';
+  if(!approxList.length)return;
+  $('dbgAS').textContent='📏 Приблизні координати в місті ('+approxList.length+') — можна виправити незалежно від радіуса';
+  $('dbgAL').innerHTML=approxList.map((r,i)=>{
+    const b=base[r.address];
+    return `<div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+      <span style="flex:1">${esc(r.raw)}${own?' · зараз ≈'+haversine(own,b.p)+' м':''}</span>
+      <button data-fixbtn="${i}">📍 Виправити на карті</button>
+    </div>`;
+  }).join('');
+  $('dbgAL').querySelectorAll('[data-fixbtn]').forEach(btn=>{
+    btn.onclick=()=>{
+      const r=approxList[+btn.dataset.fixbtn];
+      placeMode={r,btn,fix:true};
+      map.getContainer().style.cursor='crosshair';
+      st('Клікни на карті точне місце «'+r.raw+'».');
+    };
+  });
+}
+function parseCoord(t){
+  let m=t.match(/(-?\d{1,3}\.\d+)\s*[,;\s]\s*(-?\d{1,3}\.\d+)/)||t.match(/(-?\d{1,3},\d+),\s+(-?\d{1,3},\d+)/);
+  if(!m)return null;
+  const a=parseFloat(m[1].replace(',','.')),b=parseFloat(m[2].replace(',','.'));
+  return (a>43&&a<53&&b>21&&b<41)?[a,b]:null;
+}
+
+$('dl').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(base)],{type:'application/json'}));
+  a.download='pharmacies.json';a.click();
+};
+$('impb').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=ev=>{try{Object.assign(base,JSON.parse(ev.target.result));saveBase();baseInfo();st('Базу завантажено.');}catch(x){st('Не вдалося прочитати файл бази.');}};
+  rd.readAsText(f);
+};
+
+let iconSize=26,labelSize=12,addMode=false,brandIcons={},selIt=null;
+try{brandIcons=JSON.parse(localStorage.getItem('brandIcons')||'{}');}catch(e){}
+function saveIcons(){try{localStorage.setItem('brandIcons',JSON.stringify(brandIcons));}catch(e){}}
+const STOPW=new Set(['ТОВ','ФОП','ПП','ППФ','ПРАТ','МЕРЕЖА','АПТЕКА','АПТЕК','АПТЕКИ','АПТЕЧНА','АПТЕЧНИЙ']);
+function chainKey(b){const w=b.toUpperCase().replace(/[.'’ʼ]/g,' ').split(/\s+/).filter(x=>x.length>=4&&!STOPW.has(x));return w[0]||b;}
+const isBZ=b=>/БАЖАЄМО/i.test(b);
+function iconHtml(it){
+  const bi=brandIcons[chainKey(it.r.brand)]||brandIcons[it.r.brand],z=iconSize,o=it.exact?1:.6,sel=(it===selIt)?' sel':'';
+  return bi?`<img class="${sel.trim()}" src="${bi}" style="width:${z}px;height:${z}px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #333;object-fit:cover;opacity:${o}">`
+    :`<div class="dot${it.exact?'':' ap'}${sel}" style="width:${z}px;height:${z}px;background:hsl(${hue(it.r.brand)},55%,42%);display:flex;align-items:center;justify-content:center;color:#fff;font-size:${Math.round(z*.6)}px;line-height:1">✚</div>`;
+}
+const iconFor=it=>L.divIcon({className:'',html:iconHtml(it),iconSize:[iconSize,iconSize],iconAnchor:[iconSize/2,iconSize/2]});
+const DUPC=['#6b7280','#d97706','#7c3aed','#0d9488','#be185d','#65a30d','#0369a1','#b45309'];
+let dupMap={};
+const lblKey=it=>(it.r.pt?'АП ':'')+'№'+it.r.num;
+function calcDup(){
+  const cnt={};markers.forEach(m=>{const k=lblKey(m);cnt[k]=(cnt[k]||0)+1;});
+  dupMap={};let i=0;
+  Object.keys(cnt).sort().forEach(k=>{if(cnt[k]>1&&!/№1$/.test(k))dupMap[k]=DUPC[i++%DUPC.length];});
+}
+const labelIcon=it=>{
+  const dc=dupMap[lblKey(it)];
+  let st2='';
+  if(dc)st2+=`;background:${dc};color:#fff;border-color:${dc}`;
+  if(isBZ(it.r.brand))st2+=`;background:#1565d8;color:#fff;border-color:${dc||'#1565d8'};border-width:3px`;
+  return L.divIcon({className:'',html:`<div class="pin-label${it===selIt?' sel':''}" style="font-size:${labelSize}px;width:max-content;transform:translate(-50%,-50%)${st2}">${lblKey(it)} — ${it.exact?'':'≈'}${it.d} м</div>`,iconSize:[0,0]});
+};
+function refreshItem(it){it.marker.setIcon(iconFor(it));it.label.setIcon(labelIcon(it));}
+function refreshAll(){markers.forEach(refreshItem);}
+function recalc(){if(!own)return;markers.forEach(it=>{it.d=haversine(own,it.p);refreshItem(it);});renderTable();}
+function selectItem(it,fromMap){
+  const prev=selIt;
+  selIt=(!fromMap&&prev===it)?null:it;
+  [prev,it].forEach(x=>{if(x){const on=x===selIt;x.marker.setZIndexOffset(on?900:100);x.label.setZIndexOffset(on?1500:500);refreshItem(x);}});
+  renderTable();
+  const row=$('tbl').querySelector('tr.selrow');
+  if(row&&fromMap)row.scrollIntoView({block:'nearest',behavior:'smooth'});
+  if(!fromMap&&selIt&&!map.getBounds().contains(selIt.p))map.panTo(selIt.p);
+}
+function removeItem(it){if(selIt===it)selIt=null;[it.marker,it.label,it.line].forEach(l=>map.removeLayer(l));markers=markers.filter(m=>m!==it);renderTable();renderBrands();}
+function clearMarkers(){selIt=null;markers.forEach(it=>[it.marker,it.label,it.line].forEach(l=>map.removeLayer(l)));markers=[];}
+function addCompetitor(r,p,d,exact){
+  const it={r,p,d,exact};
+  it.marker=L.marker(p,{icon:iconFor(it),draggable:true,zIndexOffset:100}).addTo(map);
+  it.off=[0,-(iconSize+6+(markers.length%3)*12)];
+  const lpOf=q=>map.layerPointToLatLng(map.latLngToLayerPoint(q).add(it.off));
+  const lp=lpOf(p);
+  it.label=L.marker(lp,{icon:labelIcon(it),draggable:true,zIndexOffset:500}).addTo(map);
+  it.line=L.polyline([p,lp],{color:'#333',weight:1.5}).addTo(map);
+  it.relayout=()=>{const l=lpOf(it.p);it.label.setLatLng(l);it.line.setLatLngs([it.p,l]);};
+  it.marker.on('drag',e=>{const q=e.latlng,l=lpOf([q.lat,q.lng]);it.label.setLatLng(l);it.line.setLatLngs([q,l]);});
+  it.marker.on('dragend',e=>{
+    const q=e.target.getLatLng();it.p=[q.lat,q.lng];it.exact=true;it.d=own?haversine(own,it.p):0;
+    refreshItem(it);renderTable();
+    if(it.r.address){base[it.r.address]={p:[+q.lat.toFixed(6),+q.lng.toFixed(6)],e:1};saveBase();}
+  });
+  it.label.on('drag',e=>{const q=e.latlng,a=map.latLngToLayerPoint(q),b=map.latLngToLayerPoint(it.p);it.off=[a.x-b.x,a.y-b.y];it.line.setLatLngs([it.p,q]);});
+  it.marker.on('contextmenu',()=>removeItem(it));
+  it.marker.on('click',()=>selectItem(it,true));
+  it.label.on('click',()=>selectItem(it,true));
+  markers.push(it);
+}
+function addManual(ll){
+  addMode=false;$('addp').disabled=false;map.getContainer().style.cursor='';
+  const n=prompt('Номер аптеки (напр. 17):');
+  if(n===null||!n.trim()){st('');return;}
+  const to=parseFloat((prompt('ТО, mUAH (можна залишити порожнім):')||'').replace(',','.'))||0;
+  const p=[ll.lat,ll.lng];
+  addCompetitor({num:n.trim(),brand:'Додано вручну',raw:'Аптека №'+n.trim()+' (додано вручну)',address:'',to},p,own?haversine(own,p):0,true);
+  renderTable();renderBrands();st('');
+}
+$('addp').onclick=()=>{addMode=true;$('addp').disabled=true;map.getContainer().style.cursor='crosshair';st('Клікни на карті там, де стоїть аптека.');};
+$('isz').oninput=()=>{iconSize=+$('isz').value;refreshAll();renderBrands();};
+$('lsz').oninput=()=>{labelSize=+$('lsz').value;refreshAll();};
+function setBrandIcon(b,f){
+  if(!f)return;
+  const img=new Image(),u=URL.createObjectURL(f);
+  img.onload=()=>{
+    const c=document.createElement('canvas');c.width=c.height=64;
+    const g=c.getContext('2d'),m=Math.min(img.width,img.height);
+    g.drawImage(img,(img.width-m)/2,(img.height-m)/2,m,m,0,0,64,64);
+    brandIcons[b]=c.toDataURL('image/png');URL.revokeObjectURL(u);
+    saveIcons();refreshAll();renderBrands();
+  };
+  img.src=u;
+}
+function renderBrands(){
+  const groups={};
+  markers.forEach(m=>{const k=chainKey(m.r.brand);(groups[k]=groups[k]||[]).push(m);});
+  const keys=Object.keys(groups);
+  $('brandBox').style.display=keys.length?'block':'none';
+  const box=$('brandList');box.innerHTML='';
+  for(const k of keys){
+    const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;align-items:center;margin:4px 0';
+    const prev=document.createElement('span');prev.innerHTML=iconHtml({r:{brand:groups[k][0].r.brand},exact:true});
+    const name=document.createElement('span');name.textContent=k+' ('+groups[k].length+')';name.style.flex='1';
+    const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.onchange=()=>setBrandIcon(k,inp.files[0]);
+    const rs=document.createElement('button');rs.textContent='Скинути';
+    rs.onclick=()=>{delete brandIcons[k];groups[k].forEach(m=>delete brandIcons[m.r.brand]);saveIcons();refreshAll();renderBrands();};
+    row.append(prev,name,inp,rs);box.appendChild(row);
+  }
+}
+function renderTable(){
+  markers.sort((a,b)=>b.r.to-a.r.to||a.d-b.d);
+  calcDup();
+  const tb=$('tbl').querySelector('tbody');tb.innerHTML='';
+  let sum=0;
+  for(const m of markers){
+    sum+=m.r.to;
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(m.r.raw)}</td><td><input class="toin" value="${fmt(m.r.to)}" title="Можна виправити ТО"></td><td>${m.exact?'':'≈'}${m.d}</td>`;
+    if(isBZ(m.r.brand))tr.className='bz';
+    if(m===selIt)tr.classList.add('selrow');
+    tr.onclick=e=>{if(e.target.tagName==='INPUT')return;selectItem(m,false);};
+    const dc=dupMap[lblKey(m)];
+    if(dc){tr.querySelectorAll('td').forEach(td=>td.style.background=dc+'2e');tr.firstChild.insertAdjacentHTML('afterbegin',`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dc};margin-right:6px"></span>`);}
+    tr.querySelector('input').onchange=e=>{const v=parseFloat(e.target.value.replace(/\s/g,'').replace(',','.'));if(!isNaN(v))m.r.to=v;renderTable();};
+    tb.appendChild(tr);
+  }
+  markers.forEach(m=>m.label.setIcon(labelIcon(m)));
+  $('k1').textContent=markers.length?fmt(sum):'–';
+  $('k2').textContent=markers.length||'–';
+  $('k3').textContent=markers.length?fmt(sum/markers.length):'–';
+}
+
+$('save').onclick=async()=>{
+  if(selIt){const o=selIt;selIt=null;o.marker.setZIndexOffset(100);o.label.setZIndexOffset(500);refreshItem(o);renderTable();}
+  const side=$('side'),panel=$('panel'),mapEl=$('map');
+  const sv={sh:side.style.height,pm:panel.style.maxHeight,po:panel.style.overflow,mh:mapEl.style.height};
+  st('Готую зображення…');
+  try{
+    // розгортаємо список на всю довжину, щоб у картинку потрапили всі аптеки
+    side.style.height='auto';panel.style.maxHeight='none';panel.style.overflow='visible';
+    mapEl.style.height=Math.min(Math.max(mapEl.offsetHeight,side.offsetHeight),3200)+'px';
+    map.invalidateSize({pan:false});
+    await sleep(400);
+    // нічого не підганяємо під масштаб самі — зберігаємо рівно те, що на екрані.
+    // лише попереджаємо, якщо щось лишилось поза кадром.
+    const b=map.getBounds();
+    const out=[];
+    if(own&&!b.contains(own))out.push('«Приміщення»');
+    markers.forEach(it=>{if(!b.contains(it.p)||!b.contains(it.label.getLatLng()))out.push(lblKey(it));});
+    const warn=out.length?'⚠️ Поза кадром: '+out.slice(0,6).join(', ')+(out.length>6?'…':'')+'. Якщо треба їх включити — відсунь карту/зменш масштаб і збережи ще раз. ':'';
+    const cap=$('capture');
+    const canvas=await html2canvas(cap,{useCORS:true,scrollX:0,scrollY:-window.scrollY,height:cap.offsetHeight,windowHeight:Math.max(window.innerHeight,cap.offsetHeight)});
+    const a=document.createElement('a');
+    a.download='конкуренти.png';
+    a.href=canvas.toDataURL('image/png');
+    a.click();
+    st(warn+'Збережено.');
+  }catch(e){st('Не вдалося зберегти зображення: '+e.message);}
+  finally{
+    side.style.height=sv.sh;panel.style.maxHeight=sv.pm;panel.style.overflow=sv.po;mapEl.style.height=sv.mh;
+    map.invalidateSize();
+  }
+};
+</script>
+</body>
+</html>
