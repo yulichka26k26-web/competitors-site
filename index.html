@@ -98,6 +98,9 @@ tr.bz td{background:#eaf1fc}
 tr.bz td:first-child{border-left:3px solid var(--bz)}
 #premBox input{padding:4px 6px;width:100%;min-width:70px;font-size:12.3px;border-radius:5px}
 #dbgL,#dbgAL{max-height:280px;overflow:auto}
+.fbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
+.fbar input{width:280px;max-width:100%}
+.fcnt{color:var(--mut);font-size:12.5px}
 .dot.sel,img.sel{outline:4px solid #ff3b30;outline-offset:2px}
 .pin-label.sel{outline:3px solid #ff3b30}
 #tbl tbody tr{cursor:pointer}
@@ -167,8 +170,8 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <div style="margin:6px 0"><button id="premAdd">＋ Записати поточну точку</button> <button id="premExp" class="p">⬇ Завантажити Excel</button> <button id="premClr">Очистити список</button></div>
 <div style="max-height:260px;overflow:auto"><table><thead><tr><th>Дата</th><th>Місто</th><th>Адреса</th><th>Менеджер</th><th>Телефон</th><th>Від кого</th><th></th></tr></thead><tbody id="premList"></tbody></table></div></details>
 <details id="brandBox" style="display:none"><summary>Значки мереж: один значок на всю мережу (усі її юрособи)</summary><div id="brandList"></div></details>
-<details id="dbg" style="display:none"><summary id="dbgS"></summary><div id="dbgL"></div></details>
-<details id="dbgA" style="display:none"><summary id="dbgAS"></summary><div id="dbgAL"></div></details>
+<details id="dbg" style="display:none"><summary id="dbgS"></summary><div class="fbar"><input id="dbgQ" type="search" placeholder="🔍 Пошук за номером або адресою…"><span class="fcnt" id="dbgQc"></span></div><div id="dbgL"></div></details>
+<details id="dbgA" style="display:none"><summary id="dbgAS"></summary><div class="fbar"><input id="dbgAQ" type="search" placeholder="🔍 Пошук за номером або адресою…"><span class="fcnt" id="dbgAQc"></span></div><div id="dbgAL"></div></details>
 <div class="wrap">
 <div id="capture" style="display:flex;gap:0;flex:1;align-items:stretch">
 <div id="side">
@@ -540,12 +543,14 @@ function doScan(note){
   if(noc.length){
     $('dbgS').textContent='⚠️ Аптеки без координат ('+noc.length+') — постав на карті або спробуй ще раз';
     $('dbgL').innerHTML=`<div style="margin:0 0 8px"><button id="nocRetry" class="p">🔁 Спробувати ще раз саме ці (${noc.length})</button></div>`+
-      noc.map((r,i)=>`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0;padding-bottom:6px;border-bottom:1px dashed var(--bd,#d6dbe3)">
+      noc.map((r,i)=>`<div class="frow" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:6px 0;padding-bottom:6px;border-bottom:1px dashed var(--bd,#d6dbe3)">
       <span style="flex:1;min-width:220px">${esc(r.raw)}</span>
       <input data-alt="${i}" placeholder="інша назва вулиці (перехрестя)" style="width:190px;padding:4px 6px"><button data-altok="${i}">Пошук</button>
       <input data-coord="${i}" placeholder="координати з Google: 49.08, 25.72" style="width:190px;padding:4px 6px"><button data-coordok="${i}">OK</button>
       <button data-placebtn="${i}">📍 Поставити на карті</button>
     </div>`).join('');
+    $('dbgL').querySelectorAll('.frow').forEach((el,i)=>{el.dataset.s=String(noc[i].raw).toLowerCase();});
+    listFilter('dbgL','dbgQ','dbgQc');
     $('nocRetry').onclick=async()=>{
       $('nocRetry').disabled=true;
       let ok=0;
@@ -671,6 +676,16 @@ function snapPois(pois,cands){
   return res;
 }
 //</snap>
+function listFilter(listId,inputId,cntId){
+  const q=$(inputId).value.trim().toLowerCase();let n=0,t=0;
+  $(listId).querySelectorAll('.frow').forEach(el=>{
+    t++;const ok=!q||(el.dataset.s||'').includes(q);
+    el.style.display=ok?'flex':'none';if(ok)n++;
+  });
+  $(cntId).textContent=q?('Знайдено: '+n+' з '+t):'';
+}
+$('dbgQ').oninput=()=>listFilter('dbgL','dbgQ','dbgQc');
+$('dbgAQ').oninput=()=>listFilter('dbgAL','dbgAQ','dbgAQc');
 let placeMode=null;
 function renderApprox(cand){
   const approxList=cand.filter(r=>{const b=base[r.address];return b&&b.p&&!b.e;});
@@ -679,11 +694,13 @@ function renderApprox(cand){
   $('dbgAS').textContent='📏 Приблизні координати в місті ('+approxList.length+') — можна виправити незалежно від радіуса';
   $('dbgAL').innerHTML=approxList.map((r,i)=>{
     const b=base[r.address];
-    return `<div style="display:flex;gap:6px;align-items:center;margin:4px 0">
+    return `<div class="frow" style="display:flex;gap:6px;align-items:center;margin:4px 0">
       <span style="flex:1">${esc(r.raw)}${own?' · зараз ≈'+haversine(own,b.p)+' м':''}</span>
       <button data-fixbtn="${i}">📍 Виправити на карті</button>
     </div>`;
   }).join('');
+  $('dbgAL').querySelectorAll('.frow').forEach((el,i)=>{el.dataset.s=String(approxList[i].raw).toLowerCase();});
+  listFilter('dbgAL','dbgAQ','dbgAQc');
   $('dbgAL').querySelectorAll('[data-fixbtn]').forEach(btn=>{
     btn.onclick=()=>{
       const r=approxList[+btn.dataset.fixbtn];
