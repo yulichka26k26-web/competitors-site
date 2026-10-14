@@ -101,6 +101,7 @@ tr.bz td:first-child{border-left:3px solid var(--bz)}
 .fbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 8px}
 .fbar input{width:280px;max-width:100%}
 .fcnt{color:var(--mut);font-size:12.5px}
+.qcard{border:1px solid var(--warn);background:var(--warn-tint);border-radius:8px;padding:10px 12px;margin:8px 0}
 .dot.sel,img.sel{outline:4px solid #ff3b30;outline-offset:2px}
 .pin-label.sel{outline:3px solid #ff3b30}
 #tbl tbody tr{cursor:pointer}
@@ -118,7 +119,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <body>
 <header>
 <h1>🗺️ Конкуренти навколо точки</h1>
-<p>Особистий інструмент аналізу аптек-конкурентів</p>
+<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 14.10.2026-3</span></p>
 </header>
 <div class="toolbar">
 
@@ -170,6 +171,11 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <div style="margin:6px 0"><button id="premAdd">＋ Записати поточну точку</button> <button id="premExp" class="p">⬇ Завантажити Excel</button> <button id="premClr">Очистити список</button></div>
 <div style="max-height:260px;overflow:auto"><table><thead><tr><th>Дата</th><th>Місто</th><th>Адреса</th><th>Менеджер</th><th>Телефон</th><th>Від кого</th><th></th></tr></thead><tbody id="premList"></tbody></table></div></details>
 <details id="brandBox" style="display:none"><summary>Значки мереж: один значок на всю мережу (усі її юрособи)</summary><div id="brandList"></div></details>
+<details id="dbgC" style="display:none"><summary id="dbgCS">🔎 Усі аптеки міста</summary>
+<div class="fbar"><span class="fcnt" id="dbgCProg"></span><button id="dbgCQueueBtn" class="p">▶ Черга проблемних</button><label style="font-size:12.5px;color:var(--mut)"><input type="checkbox" id="dbgCUnch"> лише неперевірені</label></div>
+<div id="dbgCQueue"></div>
+<div class="fbar"><input id="dbgCQ" type="search" placeholder="Пошук: 43 або Медсервіс 43…"><span class="fcnt" id="dbgCQc"></span></div>
+<div id="dbgCL"></div></details>
 <details id="dbg" style="display:none"><summary id="dbgS"></summary><div class="fbar"><input id="dbgQ" type="search" placeholder="🔍 Пошук за номером або адресою…"><span class="fcnt" id="dbgQc"></span></div><div id="dbgL"></div></details>
 <details id="dbgA" style="display:none"><summary id="dbgAS"></summary><div class="fbar"><input id="dbgAQ" type="search" placeholder="🔍 Пошук за номером або адресою…"><span class="fcnt" id="dbgAQc"></span></div><div id="dbgAL"></div></details>
 <div class="wrap">
@@ -390,20 +396,24 @@ function onRadiusChange(v){
 }
 $('radius').oninput=()=>onRadiusChange($('radius').value);
 $('radiusR').oninput=()=>onRadiusChange($('radiusR').value);
+function applyPlacement(r,p,wasFix){
+  base[r.address]={p:[+p[0].toFixed(6),+p[1].toFixed(6)],e:1};saveBase();
+  checked[r.address]=true;saveChecked();
+  const existing=markers.find(m=>m.r.address&&m.r.address===r.address);
+  if(existing){
+    existing.p=p;existing.exact=true;existing.d=own?haversine(own,p):0;
+    existing.marker.setLatLng(p);existing.relayout();refreshItem(existing);recalc();
+  }else{
+    addCompetitor(r,p,own?haversine(own,p):0,true);
+  }
+  renderTable();renderBrands();baseInfo();
+  st((wasFix?'Виправлено: ':'Додано: ')+r.raw);
+}
 map.on('click',e=>{
   if(placeMode){
     const r=placeMode.r,btn=placeMode.btn,wasFix=placeMode.fix,p=[e.latlng.lat,e.latlng.lng];
     placeMode=null;map.getContainer().style.cursor='';
-    base[r.address]={p:[+p[0].toFixed(6),+p[1].toFixed(6)],e:1};saveBase();
-    const existing=markers.find(m=>m.r.address&&m.r.address===r.address);
-    if(existing){
-      existing.p=p;existing.exact=true;existing.d=own?haversine(own,p):0;
-      existing.marker.setLatLng(p);existing.relayout();refreshItem(existing);recalc();
-    }else{
-      addCompetitor(r,p,own?haversine(own,p):0,true);
-    }
-    renderTable();renderBrands();baseInfo();
-    st((wasFix?'Виправлено: ':'Додано: ')+r.raw);
+    applyPlacement(r,p,wasFix);
     if(btn&&btn.closest('div'))btn.closest('div').remove();
     return;
   }
@@ -465,7 +475,17 @@ renderPrem();
 let base={},scanning=false;
 try{base=JSON.parse(localStorage.getItem('pharmBase')||'{}');}catch(e){}
 function saveBase(){try{localStorage.setItem('pharmBase',JSON.stringify(base));return true;}catch(e){st('У браузері закінчилося місце: натисни «Зберегти базу» і поклади файл pharmacies.json поруч з index.html на Netlify.');return false;}}
-fetch('pharmacies.json').then(r=>r.ok?r.json():null).then(j=>{if(j){for(const k in j)if(!(k in base))base[k]=j[k];baseInfo();}}).catch(()=>{});
+let checked={};try{checked=JSON.parse(localStorage.getItem('pharmChecked')||'{}');}catch(e){}
+const saveChecked=()=>{try{localStorage.setItem('pharmChecked',JSON.stringify(checked));}catch(e){}};
+var cfQueue=false,cfOpened=false;const cfSkip=new Set();
+function mergeBaseJson(j,keepOwn){
+  for(const k in j){
+    if(k==='__checked'){Object.assign(checked,j[k]);continue;}
+    if(keepOwn){if(!(k in base))base[k]=j[k];}else base[k]=j[k];
+  }
+  saveChecked();
+}
+fetch('pharmacies.json').then(r=>r.ok?r.json():null).then(j=>{if(j){mergeBaseJson(j,true);baseInfo();}}).catch(()=>{});
 const fmt=n=>n.toFixed(2).replace('.',',');
 function hue(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return h%360;}
 function cityCands(){
@@ -486,6 +506,7 @@ function baseInfo(){
     t+=` · у місті «${$('city').value.trim()}» готово ${done} з ${c.length}`+(failed?` (${failed} не знайдено — повторна спроба при наступному «Підготувати базу»)`:'');
   }
   $('baseInfo').textContent=t;
+  renderCityFind();
 }
 function updateScanBtn(){$('scan').disabled=!own||!$('city').value.trim();}
 $('city').oninput=()=>{updateScanBtn();baseInfo();};
@@ -536,6 +557,7 @@ function doScan(note){
   }
   renderTable();renderBrands();
   renderApprox(cand);
+  renderCityFind();
   const approx=markers.filter(m=>!m.exact).length;
   st(`У радіусі ${rad} м: ${markers.length}`+(approx?` (${approx} зі знаком ≈ — позиція приблизна)`:'')+(missing?` · УВАГА: ${missing} з ${cand.length} аптек міста ще не в базі — натисни «Підготувати базу міста» або постав їх вручну (📍)`:'')+(outs.length?` · трохи за межею радіуса: ${outs.sort((x,y)=>x.d-y.d).slice(0,5).map(o=>(o.r.pt?'АП ':'')+'№'+o.r.num+' ('+o.d+' м)').join(', ')}`:'')+(noc.length?` · без координат: ${noc.length}`:'')+note);
   $('dbg').style.display=noc.length?'block':'none';
@@ -686,6 +708,96 @@ function listFilter(listId,inputId,cntId){
 }
 $('dbgQ').oninput=()=>listFilter('dbgL','dbgQ','dbgQc');
 $('dbgAQ').oninput=()=>listFilter('dbgAL','dbgAQ','dbgAQc');
+const cfIsProblem=r=>{const b=base[r.address];return !(b&&b.p&&b.e);};
+const cfNum=r=>parseInt(r.num,10)||0;
+const cfMarker=r=>markers.find(x=>x.r.address&&x.r.address===r.address);
+function cfGmaps(r){
+  const a=parseAddr(r.address),city=a.city||r.city.split(',').pop().trim();
+  const t=a.street?a.street+(a.house?' '+a.house:'')+', '+city:r.address.replace(/^Україна,\s*/i,'');
+  return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(t+', Україна');
+}
+function cfStatus(r){
+  const b=base[r.address],m=cfMarker(r);
+  if(m)return '<span style="color:#1a7f37">✔ на карті'+(own?' · '+m.d+' м':'')+(m.exact?'':' · ≈')+'</span>';
+  if(b&&b.p)return '<span style="color:#b45309">є координати'+(b.e?'':' (приблизні)')+(own?', але за межами радіуса: '+haversine(own,b.p)+' м':'')+'</span>';
+  return '<span style="color:#b91c1c">немає координат</span>';
+}
+function cfActions(r,i){
+  const b=base[r.address],has=cfMarker(r)||(b&&b.p);
+  return `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:5px">
+    ${cfMarker(r)?`<button data-cshow="${i}">🎯 Показати</button>`:''}
+    <button data-cfix="${i}">📍 ${has?'Перенести':'Поставити'} на карті</button>
+    <button data-cg="${i}">🌐 Google Карти</button>
+    <input data-ccoord="${i}" placeholder="координати з Google: 49.08, 33.4" style="width:215px;min-width:0">
+    <button data-cok="${i}">OK</button>
+    <label style="font-size:12.5px;color:var(--mut);white-space:nowrap"><input type="checkbox" data-cchk="${i}" ${checked[r.address]?'checked':''}> перевірено</label>
+  </div>`;
+}
+function cfBind(root,arr){
+  const g=sel=>root.querySelectorAll(sel);
+  g('[data-cfix]').forEach(b=>{b.onclick=()=>{
+    const r=arr[+b.dataset.cfix];
+    placeMode={r,btn:null,fix:true};
+    map.getContainer().style.cursor='crosshair';
+    st('Клікни на карті точне місце «'+r.raw+'».');
+  };});
+  g('[data-cshow]').forEach(b=>{b.onclick=()=>{
+    const m=cfMarker(arr[+b.dataset.cshow]);
+    if(m){map.setView(m.p,Math.max(map.getZoom(),17));selectItem(m,true);}
+  };});
+  g('[data-cg]').forEach(b=>{b.onclick=()=>window.open(cfGmaps(arr[+b.dataset.cg]),'_blank','noopener');});
+  const put=i=>{
+    const r=arr[i],inp=root.querySelector('[data-ccoord="'+i+'"]'),p=parseCoord(inp.value);
+    if(!p){st('Не розпізнала координати. У Google Картах: правий клік по аптеці → перший рядок меню (копіює координати) → встав сюди, напр. 49.0832, 25.7231');return;}
+    applyPlacement(r,p,true);
+  };
+  g('[data-cok]').forEach(b=>{b.onclick=()=>put(+b.dataset.cok);});
+  g('[data-ccoord]').forEach(inp=>{inp.onkeydown=e=>{if(e.key==='Enter')put(+inp.dataset.ccoord);};});
+  g('[data-cchk]').forEach(c=>{c.onchange=()=>{
+    const r=arr[+c.dataset.cchk];
+    if(c.checked)checked[r.address]=true;else delete checked[r.address];
+    saveChecked();renderCityFind();
+  };});
+  g('[data-cskip]').forEach(b=>{b.onclick=()=>{cfSkip.add(arr[+b.dataset.cskip].address);renderCityFind();};});
+}
+function renderCityFind(){try{renderCityFindImpl();}catch(e){console.warn('renderCityFind',e);}}
+function renderCityFindImpl(){
+  const box=$('dbgC'),L=$('dbgCL'),Q=$('dbgCQueue');
+  if(!box||!L||!Q)return;
+  const cand=registry.length?cityCands():[];
+  box.style.display=cand.length?'block':'none';
+  if(!cand.length)return;
+  if(!cfOpened){box.open=true;cfOpened=true;}
+  const nCh=cand.filter(r=>checked[r.address]).length;
+  const probs=cand.filter(r=>cfIsProblem(r)&&!checked[r.address]);
+  $('dbgCS').textContent='🔎 Усі аптеки міста ('+cand.length+') — пошук, черга проблемних, перевірено '+nCh;
+  $('dbgCProg').textContent='Перевірено: '+nCh+' з '+cand.length+' · проблемних (немає точної позиції): '+probs.length;
+  $('dbgCQueueBtn').textContent=cfQueue?'⏹ Закрити чергу':'▶ Черга проблемних ('+probs.length+')';
+  if(cfQueue){
+    const q=probs.filter(r=>!cfSkip.has(r.address)).sort((a,b)=>cfNum(a)-cfNum(b));
+    if(!q.length){
+      Q.innerHTML='<div class="qcard">'+(probs.length?'Усі проблемні пропущені ('+cfSkip.size+'). <button id="cfUnskip">Повернути пропущені</button>':'🎉 Проблемних аптек не залишилось.')+'</div>';
+      const u=$('cfUnskip');if(u)u.onclick=()=>{cfSkip.clear();renderCityFind();};
+    }else{
+      const r=q[0];
+      Q.innerHTML=`<div class="qcard"><div style="font-weight:600">Зараз: ${esc(r.raw)}</div><div>${cfStatus(r)} · у черзі ще ${q.length-1}</div>${cfActions(r,0)}<div style="margin-top:6px"><button data-cskip="0">⏭ Пропустити</button></div></div>`;
+      cfBind(Q,[r]);
+    }
+  }else Q.innerHTML='';
+  const qs=$('dbgCQ').value.trim().toLowerCase();
+  if(!qs){L.innerHTML='<div style="color:var(--mut);font-size:13px;padding:4px 0">Введи номер аптеки (43) або назву з номером (Медсервіс 43), і тут з\'являться всі аптеки міста, які підходять.</div>';$('dbgCQc').textContent='';return;}
+  const toks=qs.split(/\s+/).filter(Boolean),nums=toks.filter(t=>/^\d+$/.test(t)),onlyUn=$('dbgCUnch').checked;
+  let hits=cand.filter(r=>{const t=String(r.raw).toLowerCase();return toks.every(k=>t.includes(k))&&(!onlyUn||!checked[r.address]);});
+  const score=r=>nums.length&&nums.every(n=>String(r.num)===n)?0:1;
+  hits.sort((a,b)=>score(a)-score(b));
+  const total=hits.length;hits=hits.slice(0,40);
+  $('dbgCQc').textContent=total?('Знайдено: '+total+(total>40?' (показано перші 40, уточни пошук)':'')):'Нічого не знайдено';
+  L.innerHTML=hits.map((r,i)=>`<div class="crow" style="margin:8px 0;padding-bottom:8px;border-bottom:1px dashed var(--line)"><div>${esc(r.raw)}<br>${cfStatus(r)}</div>${cfActions(r,i)}</div>`).join('');
+  cfBind(L,hits);
+}
+$('dbgCQ').oninput=renderCityFind;
+$('dbgCUnch').onchange=renderCityFind;
+$('dbgCQueueBtn').onclick=()=>{cfQueue=!cfQueue;renderCityFind();};
 let placeMode=null;
 function renderApprox(cand){
   const approxList=cand.filter(r=>{const b=base[r.address];return b&&b.p&&!b.e;});
@@ -719,13 +831,13 @@ function parseCoord(t){
 
 $('dl').onclick=()=>{
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(base)],{type:'application/json'}));
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(Object.keys(checked).length?Object.assign({},base,{__checked:checked}):base)],{type:'application/json'}));
   a.download='pharmacies.json';a.click();
 };
 $('impb').onchange=e=>{
   const f=e.target.files[0];if(!f)return;
   const rd=new FileReader();
-  rd.onload=ev=>{try{Object.assign(base,JSON.parse(ev.target.result));saveBase();baseInfo();st('Базу завантажено.');}catch(x){st('Не вдалося прочитати файл бази.');}};
+  rd.onload=ev=>{try{mergeBaseJson(JSON.parse(ev.target.result),false);saveBase();baseInfo();st('Базу завантажено.');}catch(x){st('Не вдалося прочитати файл бази.');}};
   rd.readAsText(f);
 };
 
@@ -784,7 +896,7 @@ function addCompetitor(r,p,d,exact){
   it.marker.on('dragend',e=>{
     const q=e.target.getLatLng();it.p=[q.lat,q.lng];it.exact=true;it.d=own?haversine(own,it.p):0;
     refreshItem(it);renderTable();
-    if(it.r.address){base[it.r.address]={p:[+q.lat.toFixed(6),+q.lng.toFixed(6)],e:1};saveBase();}
+    if(it.r.address){base[it.r.address]={p:[+q.lat.toFixed(6),+q.lng.toFixed(6)],e:1};saveBase();checked[it.r.address]=true;saveChecked();renderCityFind();}
   });
   it.label.on('drag',e=>{const q=e.latlng,a=map.latLngToLayerPoint(q),b=map.latLngToLayerPoint(it.p);it.off=[a.x-b.x,a.y-b.y];it.line.setLatLngs([it.p,q]);});
   it.marker.on('contextmenu',()=>removeItem(it));
