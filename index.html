@@ -119,7 +119,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <body>
 <header>
 <h1>🗺️ Конкуренти навколо точки</h1>
-<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 14.10.2026-4</span></p>
+<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 19.10.2026-5</span></p>
 </header>
 <div class="toolbar">
 
@@ -226,7 +226,7 @@ function haversine(a,b){const R=6371000,r=Math.PI/180;
   const x=Math.sin(dLat/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin(dLng/2)**2;
   return Math.round(2*R*Math.asin(Math.sqrt(x)));}
 //<parse>
-const ROW_RE=/(Аптека|Аптечний\s+пункт)\s*№\s*(\d+\S*)\s+(.+?)\s*\(([^)]*)\)\s*\/\s*(.+?)\/?\s*$/i;
+const ROW_RE=/(Аптека|Аптечний\s+пункт)(?:\s*№\s*(\d+\S*)\s+|\s*№\s*|\s+)(.+?)\s*\(([^)]*)\)\s*\/\s*(.+?)\/?\s*$/i;
 const ST_MAP={'вул':'вулиця','вулиця':'вулиця','пров':'провулок','провулок':'провулок','просп':'проспект','пр-т':'проспект','проспект':'проспект','бул':'бульвар','б-р':'бульвар','бульвар':'бульвар','пл':'площа','площа':'площа','наб':'набережна','набережна':'набережна','узвіз':'узвіз','проїзд':'проїзд','пр-д':'проїзд','шосе':'шосе','майдан':'майдан','алея':'алея','тупік':'тупік'};
 const STREET_RE=/^(вулиця|вул|провулок|пров|проспект|просп|пр-т|бульвар|бул|б-р|площа|пл|набережна|наб|узвіз|проїзд|пр-д|шосе|майдан|алея|тупік)\.?\s*(.+)$/i;
 function parseAddr(a){
@@ -245,22 +245,30 @@ function parseAddr(a){
   return {city,street,house,state};
 }
 function parseRows(rows){
-  const out=[];let bad=null;
+  const out=[],skipped=[];let bad=null;
+  const clean=c=>c.replace(/\u00a0/g,' ').replace(/^\d+\.\s*/,'').trim();
   for(const row of rows){
     if(!Array.isArray(row))continue;
-    const idx=row.findIndex(c=>typeof c==='string'&&/(?:Аптек[аи]|Аптечний\s+пункт)\s*№/i.test(c));
-    if(idx<0)continue;
-    const raw=row[idx].replace(/\u00a0/g,' ').replace(/^\d+\.\s*/,'').trim();
+    const idx=row.findIndex(c=>typeof c==='string'&&ROW_RE.test(clean(c)));
+    if(idx<0){
+      const li=row.findIndex(c=>typeof c==='string'&&/(?:Аптек[аи]|Аптечний\s+пункт)\s*№/i.test(c));
+      if(li>=0)bad=bad||clean(row[li]);
+      else{
+        const si=row.findIndex(c=>typeof c==='string'&&/аптек|аптечн/i.test(c)&&c.includes('/'));
+        if(si>=0)skipped.push(clean(row[si]));
+      }
+      continue;
+    }
+    const raw=clean(row[idx]);
     const m=raw.match(ROW_RE);
-    if(!m){bad=bad||raw;continue;}
     let to=0;
     for(const c of row.slice(idx+1)){
       if(typeof c==='number'){to=c;break;}
       if(typeof c==='string'&&/^[\d\s.,]+$/.test(c.trim())){to=parseFloat(c.replace(/\s/g,'').replace(',','.'))||0;break;}
     }
-    out.push({raw,pt:/пункт/i.test(m[1]),num:m[2],brand:m[3].trim(),city:m[4].trim(),address:m[5].trim(),to});
+    out.push({raw,pt:/пункт/i.test(m[1]),num:m[2]||'',brand:m[3].trim(),city:m[4].trim(),address:m[5].trim(),to});
   }
-  return {out,bad};
+  return {out,bad,skipped};
 }
 //</parse>
 async function nom(params){
@@ -344,17 +352,18 @@ $('reg').onchange=e=>{
   const rd=new FileReader();
   rd.onload=ev=>{
     const wb=XLSX.read(ev.target.result,{type:'array'});
-    let all=[],bad=null;
+    let all=[],bad=null,skipped=[];
     for(const n of wb.SheetNames){
-      const {out,bad:b}=parseRows(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1}));
-      all=all.concat(out);bad=bad||b;
+      const {out,bad:b,skipped:sk}=parseRows(XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1}));
+      all=all.concat(out);bad=bad||b;skipped=skipped.concat(sk);
     }
+    const noNum=all.filter(r=>!r.num).length;
     registry=all;
     saveRegistry();
     $('regInfo').textContent=regInfoText(registry.length,Date.now());
     $('regClr').style.display='inline-block';
     baseInfo();
-    st(registry.length?'':'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
+    st(registry.length?('Додано аптек: '+registry.length+(noNum?' (з них без номера: '+noNum+')':'')+(skipped.length?' · НЕ розпізнано рядків зі словом «Аптека»: '+skipped.length+', приклад: '+skipped[0]:'')):'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
   };
   rd.readAsArrayBuffer(f);
 };
@@ -719,7 +728,7 @@ function listFilter(listId,inputId,cntId){
 $('dbgQ').oninput=()=>listFilter('dbgL','dbgQ','dbgQc');
 $('dbgAQ').oninput=()=>listFilter('dbgAL','dbgAQ','dbgAQc');
 const cfIsProblem=r=>{const b=posOf(r);return !(b&&b.p&&b.e);};
-const cfNum=r=>parseInt(r.num,10)||0;
+const cfNum=r=>parseInt(r.num,10)||1e9;
 const cfMarker=r=>markers.find(x=>x.r.raw&&x.r.raw===r.raw);
 function cfGmaps(r){
   const a=parseAddr(r.address),city=a.city||r.city.split(',').pop().trim();
@@ -866,7 +875,7 @@ function iconHtml(it){
 const iconFor=it=>L.divIcon({className:'',html:iconHtml(it),iconSize:[iconSize,iconSize],iconAnchor:[iconSize/2,iconSize/2]});
 const DUPC=['#6b7280','#d97706','#7c3aed','#0d9488','#be185d','#65a30d','#0369a1','#b45309'];
 let dupMap={};
-const lblKey=it=>(it.r.pt?'АП ':'')+'№'+it.r.num;
+const lblKey=it=>it.r.num?((it.r.pt?'АП ':'')+'№'+it.r.num):(it.r.pt?'АП ':'')+chainKey(it.r.brand);
 function calcDup(){
   const cnt={};markers.forEach(m=>{const k=lblKey(m);cnt[k]=(cnt[k]||0)+1;});
   dupMap={};let i=0;
