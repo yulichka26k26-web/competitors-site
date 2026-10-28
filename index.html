@@ -119,7 +119,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <body>
 <header>
 <h1>🗺️ Конкуренти навколо точки</h1>
-<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 19.10.2026-5</span></p>
+<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 28.10.2026-6</span></p>
 </header>
 <div class="toolbar">
 
@@ -487,6 +487,8 @@ try{base=JSON.parse(localStorage.getItem('pharmBase')||'{}');}catch(e){}
 function saveBase(){try{localStorage.setItem('pharmBase',JSON.stringify(base));return true;}catch(e){showSaveWarn();st('У браузері закінчилося місце: натисни «Зберегти базу» і поклади файл pharmacies.json поруч з index.html на Netlify.');return false;}}
 let checked={};try{checked=JSON.parse(localStorage.getItem('pharmChecked')||'{}');}catch(e){}
 const saveChecked=()=>{try{localStorage.setItem('pharmChecked',JSON.stringify(checked));}catch(e){showSaveWarn();}};
+let hl={};try{hl=JSON.parse(localStorage.getItem('pharmHl')||'{}');}catch(e){}
+const saveHl=()=>{try{localStorage.setItem('pharmHl',JSON.stringify(hl));}catch(e){showSaveWarn();}};
 function showSaveWarn(){const el=document.getElementById('saveWarn');if(el){el.style.display='block';el.textContent='⚠️ Браузер не зміг зберегти зміни (закінчилось місце). Натисни «⬇ Зберегти базу» і збережи файл pharmacies.json — інакше після оновлення сторінки правки можуть пропасти.';}}
 let manual={},labs={};
 try{manual=JSON.parse(localStorage.getItem('pharmManual')||'{}');}catch(e){}
@@ -499,6 +501,7 @@ function mergeBaseJson(j,keepOwn){
   for(const k in j){
     if(k==='__checked'){Object.assign(checked,j[k]);continue;}
     if(k==='__manual'){for(const a in j[k])if(!keepOwn||!(a in manual))manual[a]=j[k][a];saveManual();continue;}
+    if(k==='__hl'){for(const a in j[k])if(!keepOwn||!(a in hl))hl[a]=j[k][a];saveHl();continue;}
     if(k==='__labels'){for(const a in j[k])if(!keepOwn||!(a in labs))labs[a]=j[k][a];saveLabs();continue;}
     if(keepOwn){if(!(k in base))base[k]=j[k];}else base[k]=j[k];
   }
@@ -850,7 +853,7 @@ function parseCoord(t){
 
 $('dl').onclick=()=>{
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([JSON.stringify(Object.assign({},base,{__checked:checked,__manual:manual,__labels:labs}))],{type:'application/json'}));
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(Object.assign({},base,{__checked:checked,__manual:manual,__labels:labs,__hl:hl}))],{type:'application/json'}));
   a.download='pharmacies.json';a.click();
 };
 $('impb').onchange=e=>{
@@ -876,11 +879,7 @@ const iconFor=it=>L.divIcon({className:'',html:iconHtml(it),iconSize:[iconSize,i
 const DUPC=['#6b7280','#d97706','#7c3aed','#0d9488','#be185d','#65a30d','#0369a1','#b45309'];
 let dupMap={};
 const lblKey=it=>it.r.num?((it.r.pt?'АП ':'')+'№'+it.r.num):(it.r.pt?'АП ':'')+chainKey(it.r.brand);
-function calcDup(){
-  const cnt={};markers.forEach(m=>{const k=lblKey(m);cnt[k]=(cnt[k]||0)+1;});
-  dupMap={};let i=0;
-  Object.keys(cnt).sort().forEach(k=>{if(cnt[k]>1&&!/№1$/.test(k))dupMap[k]=DUPC[i++%DUPC.length];});
-}
+function calcDup(){dupMap={};} // підсвічування однакових номерів вимкнено
 const labelIcon=it=>{
   const dc=dupMap[lblKey(it)];
   let st2='';
@@ -964,6 +963,31 @@ function renderBrands(){
     row.append(prev,name,inp,rs);box.appendChild(row);
   }
 }
+const HLC=['#fde047','#86efac','#93c5fd','#f9a8d4','#fdba74','#c4b5fd'];
+let palEl=null;
+function closePal(){if(palEl){palEl.remove();palEl=null;}}
+function openPal(btn,m){
+  closePal();
+  palEl=document.createElement('div');
+  palEl.style.cssText='position:fixed;z-index:9999;background:#fff;border:1px solid #ccc;border-radius:10px;padding:6px 8px;display:flex;gap:7px;align-items:center;box-shadow:0 4px 14px rgba(0,0,0,.22)';
+  HLC.forEach(c=>{
+    const b=document.createElement('button');b.title='Виділити';
+    b.style.cssText='width:24px;height:24px;min-width:0;padding:0;border-radius:50%;border:1px solid #777;background:'+c;
+    b.onclick=ev=>{ev.stopPropagation();hl[m.r.raw]=c;saveHl();closePal();renderTable();};
+    palEl.appendChild(b);
+  });
+  const x=document.createElement('button');x.textContent='✕';x.title='Зняти виділення';
+  x.style.cssText='width:24px;height:24px;min-width:0;padding:0;border-radius:50%;line-height:1';
+  x.onclick=ev=>{ev.stopPropagation();delete hl[m.r.raw];saveHl();closePal();renderTable();};
+  palEl.appendChild(x);
+  document.body.appendChild(palEl);
+  const r=btn.getBoundingClientRect();
+  palEl.style.left=Math.max(8,Math.min(r.left,window.innerWidth-palEl.offsetWidth-8))+'px';
+  let top=r.bottom+4;if(top+palEl.offsetHeight>window.innerHeight-8)top=r.top-palEl.offsetHeight-4;
+  palEl.style.top=Math.max(8,top)+'px';
+}
+document.addEventListener('click',e=>{if(palEl&&!palEl.contains(e.target)&&!(e.target.classList&&e.target.classList.contains('hlbtn')))closePal();});
+$('panel').addEventListener('scroll',closePal);
 function renderTable(){
   markers.sort((a,b)=>b.r.to-a.r.to||a.d-b.d);
   calcDup();
@@ -975,9 +999,11 @@ function renderTable(){
     tr.innerHTML=`<td>${esc(m.r.raw)}</td><td><input class="toin" value="${fmt(m.r.to)}" title="Можна виправити ТО"></td><td>${m.exact?'':'≈'}${m.d}</td>`;
     if(isBZ(m.r.brand))tr.className='bz';
     if(m===selIt)tr.classList.add('selrow');
-    tr.onclick=e=>{if(e.target.tagName==='INPUT')return;selectItem(m,false);};
-    const dc=dupMap[lblKey(m)];
-    if(dc){tr.querySelectorAll('td').forEach(td=>td.style.background=dc+'2e');tr.firstChild.insertAdjacentHTML('afterbegin',`<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dc};margin-right:6px"></span>`);}
+    tr.onclick=e=>{if(e.target.tagName==='INPUT'||(e.target.classList&&e.target.classList.contains('hlbtn')))return;selectItem(m,false);};
+    const hc=hl[m.r.raw];
+    if(hc)tr.querySelectorAll('td').forEach(td=>td.style.background=hc+'99');
+    tr.firstChild.insertAdjacentHTML('afterbegin',`<span class="hlbtn" title="Виділити кольором" style="display:inline-block;width:12px;height:12px;border-radius:50%;border:1.5px solid ${hc?'#555':'#aaa'};background:${hc||'transparent'};margin-right:6px;vertical-align:-1px;cursor:pointer"></span>`);
+    tr.querySelector('.hlbtn').onclick=e=>{e.stopPropagation();openPal(e.target,m);};
     tr.querySelector('input').onchange=e=>{const v=parseFloat(e.target.value.replace(/\s/g,'').replace(',','.'));if(!isNaN(v))m.r.to=v;renderTable();};
     tb.appendChild(tr);
   }
