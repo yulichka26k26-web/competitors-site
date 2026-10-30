@@ -199,21 +199,22 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let registry=[],own=null,ownMarker=null,circle=null,markers=[],geoCache={};
 function regInfoText(n,ts){return 'Завантажено: '+n+' аптек'+(ts?' (востаннє оновлено '+new Date(ts).toLocaleString('uk-UA')+')':'');}
+const idb=(()=>{let db;const open=()=>db||(db=new Promise((res,rej)=>{const q=indexedDB.open('compsite',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));
+  const tx=(m,f)=>open().then(d=>new Promise((res,rej)=>{const t=d.transaction('kv',m),r=f(t.objectStore('kv'));t.oncomplete=()=>res(r.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error);}));
+  return{get:k=>tx('readonly',s=>s.get(k)),set:(k,v)=>tx('readwrite',s=>s.put(v,k)),del:k=>tx('readwrite',s=>s.delete(k))};})();
+try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 function saveRegistry(){
-  try{localStorage.setItem('registryV2',JSON.stringify({ts:Date.now(),data:registry}));}
-  catch(e){st('Реєстр великий, браузер не зміг зберегти його для наступного разу — доведеться завантажувати файл щоразу. Спробуй «🗑 Забути реєстр» в інших вкладках, якщо користуєшся сайтом з кількох.');}
+  idb.set('registryV2',{ts:Date.now(),data:registry}).then(()=>{try{localStorage.removeItem('registryV2');}catch(e){}})
+  .catch(()=>{st('Браузер не зміг зберегти реєстр для наступного разу — доведеться завантажувати файл щоразу.');});
 }
 (function loadRegistry(){
-  try{
-    const raw=localStorage.getItem('registryV2');
-    if(!raw)return;
-    const {ts,data}=JSON.parse(raw);
-    if(Array.isArray(data)&&data.length){registry=data;$('regInfo').textContent=regInfoText(registry.length,ts);$('regClr').style.display='inline-block';}
-  }catch(e){}
+  const apply=(ts,data)=>{if(Array.isArray(data)&&data.length){registry=data;$('regInfo').textContent=regInfoText(registry.length,ts);$('regClr').style.display='inline-block';try{baseInfo();}catch(e){}return true;}return false;};
+  const legacy=()=>{try{const raw=localStorage.getItem('registryV2');if(!raw)return;const {ts,data}=JSON.parse(raw);if(apply(ts,data))saveRegistry();}catch(e){}};
+  idb.get('registryV2').then(v=>{if(!(v&&apply(v.ts,v.data)))legacy();}).catch(legacy);
 })();
 $('regClr').onclick=()=>{
   if(!confirm('Забути збережений реєстр ('+registry.length+' аптек)? Доведеться завантажити файл заново.'))return;
-  registry=[];localStorage.removeItem('registryV2');
+  registry=[];try{localStorage.removeItem('registryV2');}catch(e){}idb.del('registryV2').catch(()=>{});
   $('regInfo').textContent='Реєстр не завантажено';$('regClr').style.display='none';baseInfo();
 };
 try{geoCache=JSON.parse(localStorage.getItem('geoCache2')||'{}');}catch(e){}
@@ -359,11 +360,12 @@ $('reg').onchange=e=>{
     }
     const noNum=all.filter(r=>!r.num).length;
     registry=all;
+    const have=new Set(all.map(r=>r.raw)),gone=Object.keys(manual).filter(k=>!have.has(k)).length;
     saveRegistry();
     $('regInfo').textContent=regInfoText(registry.length,Date.now());
     $('regClr').style.display='inline-block';
     baseInfo();
-    st(registry.length?('Додано аптек: '+registry.length+(noNum?' (з них без номера: '+noNum+')':'')+(skipped.length?' · НЕ розпізнано рядків зі словом «Аптека»: '+skipped.length+', приклад: '+skipped[0]:'')):'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
+    st(registry.length?('Додано аптек: '+registry.length+(gone?' · Немає в новому реєстрі (ймовірно закрились): '+gone+' аптек з вашими ручними правками — на карті їх не буде':'')+(noNum?' (з них без номера: '+noNum+')':'')+(skipped.length?' · НЕ розпізнано рядків зі словом «Аптека»: '+skipped.length+', приклад: '+skipped[0]:'')):'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
   };
   rd.readAsArrayBuffer(f);
 };
