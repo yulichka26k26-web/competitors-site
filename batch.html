@@ -176,7 +176,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <button id="apiLoad">⬇ Підтягнути з реєстру</button>
 </div>
 <div id="apiInfo" style="color:var(--mut);font-size:12.5px"></div>
-<textarea id="batchText" rows="5" style="width:100%;max-width:640px" placeholder="Баришівка, Баришівка центральна 6а&#10;Біла Церква, Героїв Чорнобиля 5"></textarea>
+<textarea id="batchText" rows="5" style="width:100%;max-width:640px" placeholder="ПРИКЛАД (зітри і впиши свої):&#10;Баришівка, Баришівка центральна 6а&#10;Біла Церква, Героїв Чорнобиля 5"></textarea>
 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
 <input id="batchMgr" type="text" placeholder="Менеджер (необов'язково)" style="min-width:200px">
 <label style="font-size:12.5px;color:var(--mut)"><input type="checkbox" id="batchSave"> зберігати картинки автоматично</label>
@@ -1075,29 +1075,72 @@ $('save').onclick=async()=>{
   async function waitFor(cond,ms){const t0=Date.now();while(Date.now()-t0<ms){if(cond())return true;await wait(300);}return cond();}
   const tilesDone=()=>!document.querySelector('#map .leaflet-tile:not(.leaflet-tile-loaded)');
   const safeName=s=>s.replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim().slice(0,80);
+  let approx=false;
+  function splitLine(line){
+    const l=line.replace(/\s+/g,' ').trim();
+    let city,rest;
+    const ci=l.indexOf(',');
+    if(ci>0){city=l.slice(0,ci);rest=l.slice(ci+1).trim();}
+    else{const sp=l.indexOf(' ');city=sp>0?l.slice(0,sp):l;rest=sp>0?l.slice(sp+1).trim():'';}
+    city=city.replace(/^(м|місто|с|смт|село|г)\.?\s+/i,'').trim();
+    return {city,rest};
+  }
+  async function geo(t){
+    // 1) Nominatim
+    try{const r=await nom('q='+encodeURIComponent(t+', Україна'));if(r&&r.p)return r;}catch(e){}
+    // 2) Photon
+    try{const r=await photon(t);if(r&&r.p)return r;}catch(e){}
+    return null;
+  }
   async function findPoint(line,city,rest){
-    const tries=[line];
-    const stripped=rest.replace(new RegExp('^'+city.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\s*,?\\s*','i'),'').trim();
-    if(stripped&&stripped!==rest)tries.push(city+', '+stripped);
-    if(rest!==line)tries.push(city+', '+rest);
-    for(const t of tries){
-      const prev=own;
-      $('addr').value=t;
+    approx=false;
+    // координати з Google (49.123, 25.456) у будь-якому місці рядка — найточніший варіант
+    const cm=line.match(/(-?\d{1,3}\.\d{3,})\s*[,;]\s*(-?\d{1,3}\.\d{3,})/);
+    if(cm){
+      const prevC=own;
+      $('addr').value=cm[1]+', '+cm[2];
       await $('find').onclick();
-      if(own&&own!==prev)return t;
+      if(own&&own!==prevC)return $('addr').value;
+      return null;
+    }
+    let street=rest.replace(/^(вул(иця|\.)?|ул(ица|\.)?|пров(улок|\.)?|просп(ект|\.)?|бул(ьвар|\.)?|пл(оща|\.)?)\s*/i,'').replace(/,/g,' ').replace(/\s+/g,' ').trim();
+    let house='';
+    const hm=street.match(/^(.*?)\s+(\d{1,4}\s?[А-Яа-яІіЇїЄєA-Za-z]?(?:\/\d+)?)$/);
+    if(hm){street=hm[1].trim();house=hm[2].replace(/\s+/g,'');}
+    const variants=[];
+    if(street){
+      variants.push(street+(house?' '+house:'')+', '+city);
+      variants.push('вулиця '+street+(house?' '+house:'')+', '+city);
+    }
+    variants.push(city+', '+rest);
+    const seen=new Set();let best=null,bestT=null;
+    for(const t of variants){
+      if(seen.has(t))continue;seen.add(t);
+      const r=await geo(t);
+      if(!r)continue;
+      if(r.exact){curPrem=null;setOwn(r.p,t);logPrem(t,city);return t;}
+      if(!best){best=r;bestT=t;}
+    }
+    if(best){approx=true;curPrem=null;setOwn(best.p,bestT);logPrem(bestT,city);return bestT;}
+    // останній шанс: тільки вулиця без номера
+    if(street&&house){
+      const r=await geo(street+', '+city);
+      if(r){approx=true;curPrem=null;setOwn(r.p,street+', '+city);logPrem(street+', '+city,city);return street+', '+city;}
     }
     return null;
   }
   async function openPoint(city,used){
     $('city').value=city;updateScanBtn();baseInfo();
     $('addr').value=used;
-    await $('find').onclick();
+    const rr=await geo(used);
+    if(rr){curPrem=null;setOwn(rr.p,used);}
+    await runPrep(false);
     await $('scan').onclick();
     window.scrollTo({top:0,behavior:'smooth'});
   }
   function logOpen(n,line,city,used,res){
     const d=document.createElement('div');d.style.color='#15803d';
-    d.textContent=n+'. '+line+' — готово. '+res+' ';
+    d.textContent=n+'. '+line+' — готово'+(approx?' (ПРИБЛИЗНО: точного будинку не знайшла, перевір точку на карті)':'')+'. '+res+' ';
     const b=document.createElement('button');b.textContent='Відкрити';
     b.onclick=async()=>{b.disabled=true;try{await openPoint(city,used);}finally{b.disabled=false;}};
     d.appendChild(b);bl.appendChild(d);
@@ -1105,16 +1148,16 @@ $('save').onclick=async()=>{
   bs.onclick=()=>{stopB=true;scanning=false;};
   bg.onclick=async()=>{
     const lines=$('batchText').value.split('\n').map(x=>x.trim()).filter(Boolean);
-    if(!lines.length)return;
+    bl.innerHTML='';
+    if(!lines.length){log('Поле порожнє. Сіре «Баришівка…» у полі — лише приклад. Впиши свої адреси (кожна з нового рядка) або натисни «Підтягнути з реєстру».',false);return;}
     if(!registry.length){log('Реєстр не завантажено: завантаж .xlsx на цій сторінці вище («Реєстр аптек»).',false);return;}
     stopB=false;bg.disabled=true;bs.style.display='inline-block';bl.innerHTML='';
+    log('Починаю: рядків '+lines.length+', аптек у реєстрі '+registry.length+'.');
     $('mgr').value=$('batchMgr').value.trim();
     let done=0;
     for(let i=0;i<lines.length&&!stopB;i++){
       const line=lines[i];
-      const ci=line.indexOf(',');
-      const city=(ci>0?line.slice(0,ci):line).trim();
-      const rest=ci>0?line.slice(ci+1).trim():line;
+      const {city,rest}=splitLine(line);
       bp.textContent='Точка '+(i+1)+' з '+lines.length+': '+line;
       try{
         $('city').value=city;updateScanBtn();baseInfo();
@@ -1165,4 +1208,3 @@ $('save').onclick=async()=>{
 </script>
 </body>
 </html>
- 
