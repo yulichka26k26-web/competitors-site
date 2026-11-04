@@ -119,7 +119,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 <body>
 <header>
 <h1>🗺️ Конкуренти навколо точки</h1>
-<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 28.10.2026-6</span></p>
+<p>Особистий інструмент аналізу аптек-конкурентів · <span id="ver" style="opacity:.75">версія 04.11.2026-7</span></p>
 </header>
 <div class="toolbar">
 
@@ -140,7 +140,7 @@ details#dbg summary,details#dbgA summary{color:var(--warn)}
 
 <div class="grp">
 <span class="grp-lbl">Пошук конкурентів</span>
-<input id="city" type="text" placeholder="Місто" style="min-width:150px">
+<input id="city" type="text" placeholder="Місто (або кілька через кому)" title="Якщо точка біля кількох населених пунктів, впиши їх через кому, напр.: Боярка, Тарасівка" style="min-width:230px">
 <input id="radius" type="number" value="500" style="width:80px" title="Радіус, м"><span style="color:var(--faint);font-size:12.5px">м</span>
 <input id="radiusR" type="range" min="50" max="3000" step="50" value="500" style="width:130px">
 <button id="prep">Підготувати базу міста</button>
@@ -199,22 +199,21 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let registry=[],own=null,ownMarker=null,circle=null,markers=[],geoCache={};
 function regInfoText(n,ts){return 'Завантажено: '+n+' аптек'+(ts?' (востаннє оновлено '+new Date(ts).toLocaleString('uk-UA')+')':'');}
-const idb=(()=>{let db;const open=()=>db||(db=new Promise((res,rej)=>{const q=indexedDB.open('compsite',1);q.onupgradeneeded=()=>q.result.createObjectStore('kv');q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));
-  const tx=(m,f)=>open().then(d=>new Promise((res,rej)=>{const t=d.transaction('kv',m),r=f(t.objectStore('kv'));t.oncomplete=()=>res(r.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error);}));
-  return{get:k=>tx('readonly',s=>s.get(k)),set:(k,v)=>tx('readwrite',s=>s.put(v,k)),del:k=>tx('readwrite',s=>s.delete(k))};})();
-try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}
 function saveRegistry(){
-  idb.set('registryV2',{ts:Date.now(),data:registry}).then(()=>{try{localStorage.removeItem('registryV2');}catch(e){}})
-  .catch(()=>{st('Браузер не зміг зберегти реєстр для наступного разу — доведеться завантажувати файл щоразу.');});
+  try{localStorage.setItem('registryV2',JSON.stringify({ts:Date.now(),data:registry}));}
+  catch(e){st('Реєстр великий, браузер не зміг зберегти його для наступного разу — доведеться завантажувати файл щоразу. Спробуй «🗑 Забути реєстр» в інших вкладках, якщо користуєшся сайтом з кількох.');}
 }
 (function loadRegistry(){
-  const apply=(ts,data)=>{if(Array.isArray(data)&&data.length){registry=data;$('regInfo').textContent=regInfoText(registry.length,ts);$('regClr').style.display='inline-block';try{baseInfo();}catch(e){}return true;}return false;};
-  const legacy=()=>{try{const raw=localStorage.getItem('registryV2');if(!raw)return;const {ts,data}=JSON.parse(raw);if(apply(ts,data))saveRegistry();}catch(e){}};
-  idb.get('registryV2').then(v=>{if(!(v&&apply(v.ts,v.data)))legacy();}).catch(legacy);
+  try{
+    const raw=localStorage.getItem('registryV2');
+    if(!raw)return;
+    const {ts,data}=JSON.parse(raw);
+    if(Array.isArray(data)&&data.length){registry=data;$('regInfo').textContent=regInfoText(registry.length,ts);$('regClr').style.display='inline-block';}
+  }catch(e){}
 })();
 $('regClr').onclick=()=>{
   if(!confirm('Забути збережений реєстр ('+registry.length+' аптек)? Доведеться завантажити файл заново.'))return;
-  registry=[];try{localStorage.removeItem('registryV2');}catch(e){}idb.del('registryV2').catch(()=>{});
+  registry=[];localStorage.removeItem('registryV2');
   $('regInfo').textContent='Реєстр не завантажено';$('regClr').style.display='none';baseInfo();
 };
 try{geoCache=JSON.parse(localStorage.getItem('geoCache2')||'{}');}catch(e){}
@@ -360,12 +359,11 @@ $('reg').onchange=e=>{
     }
     const noNum=all.filter(r=>!r.num).length;
     registry=all;
-    const have=new Set(all.map(r=>r.raw)),gone=Object.keys(manual).filter(k=>!have.has(k)).length;
     saveRegistry();
     $('regInfo').textContent=regInfoText(registry.length,Date.now());
     $('regClr').style.display='inline-block';
     baseInfo();
-    st(registry.length?('Додано аптек: '+registry.length+(gone?' · Немає в новому реєстрі (ймовірно закрились): '+gone+' аптек з вашими ручними правками — на карті їх не буде':'')+(noNum?' (з них без номера: '+noNum+')':'')+(skipped.length?' · НЕ розпізнано рядків зі словом «Аптека»: '+skipped.length+', приклад: '+skipped[0]:'')):'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
+    st(registry.length?('Додано аптек: '+registry.length+(noNum?' (з них без номера: '+noNum+')':'')+(skipped.length?' · НЕ розпізнано рядків зі словом «Аптека»: '+skipped.length+', приклад: '+skipped[0]:'')):'Не знайшла рядків виду «Аптека №… НАЗВА (Україна, Місто)/адреса». '+(bad?'Приклад рядка, який не розпізнано: '+bad:'У файлі немає жодної комірки зі словом «Аптека №».'));
   };
   rd.readAsArrayBuffer(f);
 };
@@ -512,13 +510,14 @@ function mergeBaseJson(j,keepOwn){
 fetch('pharmacies.json').then(r=>r.ok?r.json():null).then(j=>{if(j){mergeBaseJson(j,true);baseInfo();}}).catch(()=>{});
 const fmt=n=>n.toFixed(2).replace('.',',');
 function hue(s){let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;return h%360;}
+function cityTokens(){return $('city').value.split(/[,;+]/).map(x=>x.trim().toLowerCase()).filter(Boolean);}
 function cityCands(){
-  const city=$('city').value.trim().toLowerCase();
-  if(!city)return [];
+  const toks=cityTokens();
+  if(!toks.length)return [];
   return registry.filter(r=>{
     const a=parseAddr(r.address);
     const c=(a.city||r.city.split(',').pop()||'').trim().toLowerCase();
-    return c.includes(city);
+    return toks.some(t=>c.includes(t));
   });
 }
 function baseInfo(){
@@ -570,7 +569,7 @@ function doScan(note){
   if(!own)return;
   if(!registry.length){st('Спочатку завантаж реєстр (.xlsx).');return;}
   const rad=+$('radius').value||500,cand=cityCands();
-  if(!cand.length){st('За словом «'+$('city').value.trim()+'» у реєстрі нічого не знайдено. Пиши місто як у реєстрі (напр. «Чернівці»).');return;}
+  if(!cand.length){st('За словом «'+$('city').value.trim()+'» у реєстрі нічого не знайдено. Пиши місто як у реєстрі (напр. «Чернівці»). Якщо точка біля кількох населених пунктів, впиши їх через кому: «Боярка, Тарасівка».');return;}
   clearMarkers();
   let missing=0;const noc=[],outs=[];
   for(const r of cand){
